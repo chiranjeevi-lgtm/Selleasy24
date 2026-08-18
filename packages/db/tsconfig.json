@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    // Node16 rather than the deprecated node10 resolution. Because this package
+    // has no "type": "module", TypeScript emits CommonJS — matching the API's
+    // CommonJS NestJS build without forcing dual-module interop.
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": ["node"],
+
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  // Seed scripts are NOT built into the package — they are CLI entrypoints run
+  // through tsx. They are typechecked by tsconfig.seed.json instead, which is
+  // what `npm run typecheck` in this package runs alongside this config.
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

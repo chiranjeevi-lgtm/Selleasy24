@@ -1,0 +1,44 @@
+{
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    // Explicit allowlist rather than pulling in every @types package on disk.
+    // "multer" is required for the Express.Multer.File global augmentation used
+    // by upload handlers; "express" for the Request/Response types.
+    "types": ["node", "express", "multer"],
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "rootDir": "./src",
+
+    // NestJS dependency injection relies on decorator metadata.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+
+    // Strictness: every flag on. Turning one off later needs a reason in review.
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    // Off deliberately: NestJS decorators and Prisma's generated types both
+    // rely on optional-property assignability that this flag rejects.
+    "exactOptionalPropertyTypes": false,
+
+    "declaration": false,
+    "sourceMap": true,
+    // Deliberately NOT incremental. `npm run typecheck` runs tsc --noEmit against
+    // this same config; with incremental enabled it writes a build-info file
+    // recording those files as processed, and the next real build then skips
+    // emitting them — producing a dist/ that is silently missing modules.
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

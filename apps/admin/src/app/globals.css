@@ -1,0 +1,129 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens.
+ *
+ * Direction: non-judicial stamp paper. Indian property ownership is established
+ * by stamped, registered documents, so the interface borrows that material —
+ * pale institutional green ground, document-ink text, and a registrar's seal red
+ * reserved exclusively for verification marks. Property portals in this market
+ * are uniformly white-and-blue; this reads as an official record instead.
+ */
+@theme {
+  /* Ground: non-judicial stamp paper. Not cream, not white. */
+  --color-stamp: #e8ede6;
+  --color-stamp-deep: #d9e0d6;
+
+  /* Surfaces sit a shade above the ground, with a green whisper rather than pure white. */
+  --color-paper: #fbfcfa;
+  --color-paper-edge: #cfd8cb;
+
+  /* Document ink — near-black with a blue cast. Pure black never appears. */
+  --color-ink: #14181f;
+  --color-graphite: #5c6570;
+  --color-graphite-light: #8b939c;
+
+  /* Registrar's seal. Used ONLY on verification marks — never for buttons,
+     links, or decoration. Its scarcity is what gives it meaning. */
+  --color-seal: #a32e2a;
+  --color-seal-wash: #f2e4e3;
+
+  /* Fountain-pen indigo carries structure and interaction. */
+  --color-indigo: #2b3a67;
+  --color-indigo-deep: #1d2848;
+
+  --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  --font-body: var(--font-public-sans), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-card: 3px;
+}
+
+/*
+ * Utility type: the vernacular of rubber stamps and official form labels —
+ * condensed, uppercase, widely tracked. Signals "this is a record", not a badge.
+ */
+@utility stamp-label {
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-stamp);
+    color: var(--color-ink);
+    font-family: var(--font-body);
+    /* Slightly open body tracking keeps Public Sans legible on the tinted ground. */
+    letter-spacing: 0.002em;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Visible, high-contrast focus on the tinted ground. Never removed. */
+  :focus-visible {
+    outline: 2px solid var(--color-indigo);
+    outline-offset: 2px;
+  }
+
+  /* Numeric data — prices, areas, dates — aligns in columns. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/*
+ * The endorsement reveal. One orchestrated moment on the page that matters,
+ * rather than motion scattered everywhere.
+ */
+@keyframes endorse-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.endorse-line {
+  animation: endorse-in 340ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .endorse-line {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+ * Console overrides.
+ *
+ * The console runs a deliberately darker ground than the public site. Verifiers
+ * move between the two all day, and an instant, pre-conscious signal of "you are
+ * inside the internal tool, looking at somebody's identity documents" is worth
+ * more than visual consistency between the two surfaces.
+ */
+@theme {
+  --color-console: #dde4da;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-console);
+  }
+}

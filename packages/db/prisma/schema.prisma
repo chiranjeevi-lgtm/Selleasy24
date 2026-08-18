@@ -1,0 +1,1088 @@
+// =============================================================================
+// Kamala Infra — database schema (Batch 1)
+//
+// Design rules that must survive future changes:
+//
+//  1. Nothing is publicly visible unless a human verifier approved it. Query
+//     helpers, not controllers, are the enforcement point.
+//  2. `Listing.firstListedAt` is immutable. Bumping or re-approving a listing
+//     must never reset it — stale listings masquerading as new is the single
+//     most common complaint about incumbent portals.
+//  3. Every price change is recorded. Price history cannot be backfilled, so it
+//     is captured from day one even though the UI lands later.
+//  4. Every document *view* is logged, not just approve/reject decisions.
+//  5. Verification checks are rows, not a blob, so the public badge can show
+//     exactly what was checked and when.
+// =============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  // postgis  — reserved for Phase 2 map/radius search
+  // pg_trgm  — powers fuzzy address matching for duplicate detection
+  extensions = [postgis, pg_trgm]
+}
+
+// ----------------------------------------------------------------------------
+// Enums
+// ----------------------------------------------------------------------------
+
+/// Full role set from the PRD permission matrix. Batch 1 exercises BUYER,
+/// OWNER, VERIFIER and ADMIN; the rest exist so adding them later is a
+/// permission change rather than a migration.
+enum Role {
+  BUYER
+  OWNER
+  BROKER
+  /// Developer selling new construction. Lists projects with many units rather
+  /// than individual resale properties, and is legally required to hold a RERA
+  /// project registration before advertising at all.
+  BUILDER
+  VERIFIER
+  MODERATOR
+  ADMIN
+  SUPER_ADMIN
+}
+
+/// Residential only. Land, plots and commercial are explicitly out of scope.
+enum PropertyType {
+  FLAT
+  HOUSE
+  APARTMENT
+  BUILDING
+}
+
+/// Furnishing, facing, possession and amenities exist as enums rather than free
+/// text because the PRD's core complaint is "listings contain inconsistent or
+/// incomplete information". Free text cannot be filtered, cannot be compared
+/// field-for-field, and cannot be rendered identically on every detail page.
+enum FurnishingStatus {
+  UNFURNISHED
+  SEMI_FURNISHED
+  FULLY_FURNISHED
+}
+
+enum FacingDirection {
+  NORTH
+  SOUTH
+  EAST
+  WEST
+  NORTH_EAST
+  NORTH_WEST
+  SOUTH_EAST
+  SOUTH_WEST
+}
+
+enum PossessionStatus {
+  READY_TO_MOVE
+  UNDER_CONSTRUCTION
+}
+
+/// Fixed checklist. Adding a value is a migration, which is deliberate — an
+/// open-ended amenity list drifts into "24/7 water", "24x7 Water", "Water 24
+/// hours" and stops being filterable within a month.
+enum Amenity {
+  LIFT
+  POWER_BACKUP
+  SECURITY
+  CCTV
+  GATED_COMMUNITY
+  GYM
+  SWIMMING_POOL
+  CLUBHOUSE
+  CHILDRENS_PLAY_AREA
+  PARK
+  WATER_SUPPLY_24_7
+  BOREWELL
+  RAINWATER_HARVESTING
+  SOLAR_WATER_HEATER
+  INTERCOM
+  FIRE_SAFETY
+  VISITOR_PARKING
+  MAINTENANCE_STAFF
+  WASTE_DISPOSAL
+  VAASTU_COMPLIANT
+}
+
+/// How the seller wants to be reached about this listing. Required by the PRD
+/// at listing creation.
+enum ContactPreference {
+  PHONE
+  WHATSAPP
+  EMAIL
+  ANY
+}
+
+/// How the property is held. Power-of-attorney sales carry materially higher
+/// title risk in Telangana than a registered freehold, so this is captured as
+/// structured data a verification officer can check against the sale deed —
+/// not buried in free text where nobody will read it.
+enum OwnershipType {
+  FREEHOLD
+  LEASEHOLD
+  CO_OPERATIVE_SOCIETY
+  POWER_OF_ATTORNEY
+}
+
+/// The authority that sanctioned the building plan. Telangana-specific and a
+/// genuine trust signal: GHMC covers the city, HMDA the wider metropolitan
+/// area, DTCP the areas outside it.
+enum ApprovingAuthority {
+  GHMC
+  HMDA
+  DTCP
+  OTHER
+}
+
+enum ListingStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  ARCHIVED
+  SUSPENDED
+}
+
+/// Shown on every listing card. Buyers consistently report being misled about
+/// whether they are dealing with an owner or an agent.
+enum SellerKind {
+  OWNER
+  BROKER
+}
+
+enum DocumentKind {
+  SALE_DEED
+  ID_PROOF
+  PROPERTY_TAX_RECEIPT
+  ENCUMBRANCE_CERTIFICATE
+  NOC
+  APPROVED_PLAN
+  RERA_CERTIFICATE
+  OCCUPANCY_CERTIFICATE
+  COMPLETION_CERTIFICATE
+  SOCIETY_NOC
+}
+
+/// Deliberately document-type-agnostic. PAN and DigiLocker are the preferred
+/// paths; storing full Aadhaar scans carries retention restrictions under
+/// Indian law, so it must never be the only option. See docs/ARCHITECTURE.md.
+enum IdProofKind {
+  PAN
+  DIGILOCKER
+  AADHAAR_OFFLINE_XML
+  AADHAAR_MASKED
+  PASSPORT
+  VOTER_ID
+  DRIVING_LICENCE
+}
+
+enum VerificationDecision {
+  APPROVED
+  REJECTED
+  REVISION_REQUESTED
+}
+
+/// Each check is displayed publicly on the verified badge. A badge that does
+/// not say what was checked is worth less than no badge at all.
+enum VerificationCheckKind {
+  // --- Resale listings ---
+  OWNER_NAME_MATCHES_DEED
+  DEED_REGISTERED_AND_STAMPED
+  PROPERTY_TAX_CURRENT
+  LOCATION_MATCHES_DOCUMENTS
+  NO_ENCUMBRANCE_FOUND
+  RERA_REGISTERED
+
+  // --- Builder projects ---
+  //
+  // A separate set because the resale checks are meaningless here: there is no
+  // sale deed for a flat that does not exist yet, and no property tax on it.
+  // Reusing them would have officers marking half the list "not applicable"
+  // every time, which trains them to stop reading it.
+  /// The project's RERA registration exists and is current. Advertising an
+  /// unregistered project is illegal, so this is the gating check.
+  PROJECT_RERA_VALID
+  /// Building plan sanctioned by the competent authority (GHMC, HMDA or DTCP).
+  PROJECT_PLAN_SANCTIONED
+  /// Commencement certificate issued — construction is legally allowed to start.
+  PROJECT_COMMENCEMENT_CERTIFICATE
+  /// Land title is clear and the builder has the right to develop it.
+  PROJECT_LAND_TITLE_CLEAR
+  /// Completed projects only: occupancy certificate issued.
+  PROJECT_OCCUPANCY_CERTIFICATE
+}
+
+/// Where a project sits in its lifecycle.
+///
+/// A builder's portfolio spans all of these at once, and the distinction is the
+/// single most important thing a buyer wants: an unbuilt flat and a delivered
+/// one are different purchases carrying different risk.
+enum ProjectStage {
+  /// Announced, RERA registered, not yet selling.
+  PRE_LAUNCH
+  UNDER_CONSTRUCTION
+  /// Structurally complete, awaiting occupancy certificate.
+  NEARING_POSSESSION
+  /// Occupancy certificate issued, units available now.
+  READY_TO_MOVE
+  /// Handed over. Usually no inventory left — kept because a builder's record
+  /// of delivering past projects is what a buyer judges the current one on.
+  DELIVERED
+}
+
+/// Publication state of a project. Mirrors ListingStatus deliberately: the same
+/// promise applies, that nothing reaches a buyer before an officer has checked it.
+enum ProjectStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  ARCHIVED
+  SUSPENDED
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  INTERESTED
+  NOT_INTERESTED
+  CONVERTED
+}
+
+enum ReportReason {
+  FAKE_LISTING
+  ALREADY_SOLD
+  INCORRECT_DETAILS
+  DUPLICATE
+  SPAM_OR_ABUSE
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  IN_REVIEW
+  RESOLVED
+  DISMISSED
+}
+
+// ----------------------------------------------------------------------------
+// Identity
+// ----------------------------------------------------------------------------
+
+model User {
+  id           String  @id @default(uuid()) @db.Uuid
+  email        String  @unique
+  /// E.164. Optional at registration, required before a listing may be
+  /// submitted for review.
+  phone        String? @unique
+  fullName     String
+  /// argon2id. Never logged, never returned by any serializer.
+  passwordHash String
+
+  role Role @default(BUYER)
+
+  /// Set when role is OWNER or BROKER. Drives the Owner/Broker label.
+  sellerKind SellerKind?
+  /// RERA registration number — mandatory for brokers before listing.
+  reraNumber String?
+
+  isEmailVerified Boolean   @default(false)
+  isPhoneVerified Boolean   @default(false)
+  isActive        Boolean   @default(true)
+  /// Populated when an admin suspends the account.
+  suspendedAt     DateTime?
+  suspendedReason String?
+
+  /// Per-account brute-force protection, complementing the per-IP rate limit.
+  /// IP throttling alone does not stop a distributed attack on one account.
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  savedListings          SavedListing[]
+  builderProjects        Project[]                @relation("BuilderProjects")
+  verifiedProjects       Project[]                @relation("VerifierProjects")
+  projectDocuments       ProjectDocument[]
+  listings               Listing[]                @relation("SellerListings")
+  verifiedListings       Listing[]                @relation("VerifierListings")
+  uploadedDocuments      Document[]
+  documentAccesses       DocumentAccessLog[]
+  verifications          Verification[]
+  leadsSubmitted         Lead[]
+  priceChanges           PriceHistory[]
+  reportsFiled           ListingReport[]          @relation("ReporterReports")
+  reportsResolved        ListingReport[]          @relation("ResolverReports")
+  auditLogs              AuditLog[]
+  refreshTokens          RefreshToken[]
+  passwordResetTokens    PasswordResetToken[]
+  emailVerificationToken EmailVerificationToken[]
+
+  @@index([role])
+  @@index([isActive])
+  @@map("users")
+}
+
+// ----------------------------------------------------------------------------
+// Session & token handling
+// ----------------------------------------------------------------------------
+
+/// Refresh tokens are stored hashed and rotated on every use. A replayed token
+/// that has already been rotated indicates theft — the handler revokes the
+/// whole family rather than just rejecting the request.
+model RefreshToken {
+  id        String @id @default(uuid()) @db.Uuid
+  userId    String @db.Uuid
+  tokenHash String @unique
+
+  /// Groups tokens descended from one login, so a detected replay can revoke
+  /// the entire lineage.
+  familyId String @db.Uuid
+
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  /// Set when this token is exchanged, making replay detectable.
+  rotatedAt      DateTime?
+  createdByIp    String?
+  createdByAgent String?
+  createdAt      DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("email_verification_tokens")
+}
+
+// ----------------------------------------------------------------------------
+// Location
+// ----------------------------------------------------------------------------
+
+/// Fixed reference data, not free text, so search results stay consistent.
+/// `city` sits above locality so expansion beyond Hyderabad is a data change.
+model Neighborhood {
+  id      String @id @default(uuid()) @db.Uuid
+  name    String
+  city    String
+  state   String @default("Telangana")
+  pincode String
+
+  /// Cached locality benchmark, recomputed periodically from approved listings.
+  /// Surfaced to buyers as "₹X/sqft vs locality median ₹Y" — the incumbents
+  /// compute this and hide it behind a paywall.
+  medianPricePerSqft Decimal?  @db.Decimal(12, 2)
+  medianSampleSize   Int?
+  medianComputedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  properties Property[]
+  projects   Project[]
+
+  @@unique([name, city, pincode])
+  @@index([city])
+  @@index([pincode])
+  @@map("neighborhoods")
+}
+
+// ----------------------------------------------------------------------------
+// Property & listing
+//
+// A Property is the physical asset; a Listing is one attempt to sell it. The
+// split lets the same flat be relisted later without losing its history.
+// ----------------------------------------------------------------------------
+
+model Property {
+  id      String @id @default(uuid()) @db.Uuid
+  address String
+  pincode String
+
+  /// Nullable in Batch 1 — map search is Phase 2. PostGIS is already enabled
+  /// so adding a geography column later needs no extension change.
+  latitude  Decimal? @db.Decimal(10, 8)
+  longitude Decimal? @db.Decimal(11, 8)
+
+  propertyType PropertyType
+  bedrooms     Int
+  bathrooms    Int
+  /// Built-up area — the figure Indian listings quote by default.
+  areaSqft     Int
+  /// Carpet area, the usable floor space. RERA requires it to be disclosed and
+  /// it is typically 30% smaller than built-up, so quoting only built-up is the
+  /// most common way a price per sq ft is made to look better than it is.
+  /// Optional because older resale sellers frequently do not know it.
+  carpetAreaSqft Int?
+  balconies      Int?
+  yearBuilt      Int?
+
+  /// Which floor the unit is on. Null for an independent house, and null when
+  /// the seller has not said — the PRD lists floor as optional at creation.
+  /// `floor` may legitimately be 0 (ground) or negative (basement), so a
+  /// missing value must be null rather than 0.
+  floor       Int?
+  totalFloors Int?
+
+  /// Possession is required: a buyer filtering for "ready to move" gets a
+  /// misleading result set if half the inventory has no value. Every seller
+  /// knows this about their own property, so there is no reason to allow null.
+  possession PossessionStatus
+
+  furnishing FurnishingStatus?
+  facing     FacingDirection?
+
+  /// Nullable, not defaulted to 0 — "no covered parking" and "seller did not
+  /// say" are different facts, and a buyer filtering on parking must not be
+  /// shown listings that simply left it blank.
+  coveredParking Int?
+  openParking    Int?
+
+  /// Title and sanction. Both are optional at listing time but are exactly what
+  /// a verification officer compares against the sale deed and approved plan,
+  /// so capturing them structurally is what lets the check be recorded rather
+  /// than described.
+  ownership          OwnershipType?
+  approvingAuthority ApprovingAuthority?
+
+  /// Postgres enum array. Queried with `has` / `hasEvery`, backed by the GIN
+  /// index below so amenity filters do not degrade into sequential scans.
+  ///
+  /// The empty-array default is declared here as well as in the database.
+  /// Prisma omits column defaults for scalar lists by default, which leaves the
+  /// database default looking like drift on every future `migrate diff`.
+  amenities Amenity[] @default([])
+
+  neighborhoodId String @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  neighborhood Neighborhood @relation(fields: [neighborhoodId], references: [id])
+  listings     Listing[]
+
+  @@index([neighborhoodId])
+  @@index([propertyType])
+  @@index([bedrooms])
+  @@index([pincode])
+  @@index([possession])
+  @@index([furnishing])
+  @@index([approvingAuthority])
+  @@index([ownership])
+  /// GIN over the amenity array so `amenities has X` is an index lookup.
+  @@index([amenities], type: Gin)
+  /// Trigram index powering fuzzy address matching for duplicate detection.
+  /// Declared here rather than only in raw SQL because Prisma CAN introspect a
+  /// plain-column GIN index — leaving it out of the schema makes every future
+  /// `migrate diff` try to drop it.
+  ///
+  /// The partial and expression indexes in 20260730000100_search_indexes are NOT
+  /// expressible in Prisma's schema language. Prisma cannot introspect those, so
+  /// they do not appear as drift — but any generated migration must still be
+  /// read before it is applied.
+  @@index([address(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@map("properties")
+}
+
+model Listing {
+  id         String @id @default(uuid()) @db.Uuid
+  propertyId String @db.Uuid
+  sellerId   String @db.Uuid
+
+  title       String
+  description String
+  price       Decimal @db.Decimal(14, 2)
+
+  priceNegotiable Boolean @default(false)
+
+  /// Sits on the listing rather than the user: a seller may be happy to take
+  /// calls about one property and want email only about another.
+  contactPreference ContactPreference @default(ANY)
+
+  status ListingStatus @default(DRAFT)
+
+  /// Denormalised from the latest approval so public queries stay single-table.
+  isVerified Boolean @default(false)
+
+  /// IMMUTABLE. Set once when the listing first becomes publicly visible and
+  /// never touched again — not on edit, not on re-approval, not on any bump.
+  /// This is what makes "listed 3 days ago" honest.
+  firstListedAt DateTime?
+
+  /// Last time the seller affirmed the property is still available. Drives the
+  /// "Owner confirmed available N days ago" signal and, in Batch 2, the
+  /// auto-hide sweep for unconfirmed listings.
+  lastConfirmedAt DateTime?
+
+  submittedAt  DateTime?
+  verifiedAt   DateTime?
+  verifiedById String?   @db.Uuid
+
+  /// Shown to the seller only. Never exposed on a public endpoint.
+  rejectionReason String?
+  revisionNote    String?
+
+  /// Counters are denormalised for read performance. ListingView and Lead are
+  /// the sources of truth.
+  viewsCount Int @default(0)
+  leadsCount Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  property      Property        @relation(fields: [propertyId], references: [id])
+  seller        User            @relation("SellerListings", fields: [sellerId], references: [id])
+  verifiedBy    User?           @relation("VerifierListings", fields: [verifiedById], references: [id])
+  photos        ListingPhoto[]
+  documents     Document[]
+  verifications Verification[]
+  leads         Lead[]
+  priceHistory  PriceHistory[]
+  views         ListingView[]
+  reports       ListingReport[]
+  savedBy       SavedListing[]
+
+  // Composite index matching the public search path: approved listings,
+  // newest first.
+  @@index([status, firstListedAt])
+  @@index([sellerId, status])
+  @@index([propertyId])
+  @@index([price])
+  @@index([submittedAt])
+  @@map("listings")
+}
+
+model ListingPhoto {
+  id        String @id @default(uuid()) @db.Uuid
+  listingId String @db.Uuid
+
+  /// Object key in the public media bucket. Never a full URL — the CDN host
+  /// is environment-specific.
+  storageKey String
+  sortOrder  Int    @default(0)
+  width      Int?
+  height     Int?
+  sizeBytes  Int?
+
+  createdAt DateTime @default(now())
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId, sortOrder])
+  @@map("listing_photos")
+}
+
+/// Append-only. Every price change writes a row, enabling "reduced from ₹85L".
+/// Cannot be reconstructed after the fact, which is why it exists in Batch 1
+/// even though the UI ships later.
+model PriceHistory {
+  id            String   @id @default(uuid()) @db.Uuid
+  listingId     String   @db.Uuid
+  price         Decimal  @db.Decimal(14, 2)
+  /// Null for the initial price at creation.
+  previousPrice Decimal? @db.Decimal(14, 2)
+  changedById   String?  @db.Uuid
+  changedAt     DateTime @default(now())
+
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  changedBy User?   @relation(fields: [changedById], references: [id])
+
+  @@index([listingId, changedAt])
+  @@map("price_history")
+}
+
+/// One row per unique viewer per day, so `Listing.viewsCount` means something.
+/// `sessionHash` is a salted hash of the session identifier — never a raw IP,
+/// which would be storing personal data we have no need for.
+model ListingView {
+  id          String   @id @default(uuid()) @db.Uuid
+  listingId   String   @db.Uuid
+  sessionHash String
+  /// Date bucket enabling the per-day uniqueness constraint below.
+  viewedOn    DateTime @db.Date
+  viewedAt    DateTime @default(now())
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([listingId, sessionHash, viewedOn])
+  @@index([listingId])
+  @@map("listing_views")
+}
+
+// ----------------------------------------------------------------------------
+// Builder projects
+//
+// A project is a development — a tower or gated community — containing many
+// units across configurations. Deliberately separate from Listing rather than a
+// flag on it: a resale listing is one specific property with one price and one
+// owner, while a project has a price *range*, unsold inventory, a possession
+// date and no owner yet. Forcing both through one table would mean half the
+// columns being null for whichever kind it was not.
+// ----------------------------------------------------------------------------
+
+model Project {
+  id        String @id @default(uuid()) @db.Uuid
+  builderId String @db.Uuid
+
+  name        String
+  description String
+
+  // --- Location ---
+  address        String
+  pincode        String
+  neighborhoodId String @db.Uuid
+
+  // --- Lifecycle ---
+  stage ProjectStage
+
+  /// Expected handover for anything unfinished; the actual date once delivered.
+  /// Stored as a date rather than a quarter string so it can be sorted and
+  /// compared — "Q4 2027" cannot.
+  possessionDate DateTime?
+  /// Set when the project was actually handed over. Kept apart from
+  /// `possessionDate` on purpose: the gap between promised and actual delivery
+  /// is exactly the track record a buyer is trying to judge, and overwriting one
+  /// with the other would erase it.
+  deliveredOn    DateTime?
+
+  // --- Statutory ---
+  /// RERA project registration. Not optional: advertising an unregistered
+  /// project is illegal in Telangana, so a project cannot even be submitted
+  /// without one.
+  reraNumber         String
+  approvingAuthority ApprovingAuthority?
+
+  // --- Scale ---
+  totalTowers Int?
+  totalUnits  Int?
+  /// Land area in acres, the unit Indian project listings quote.
+  landAreaAcres Decimal? @db.Decimal(8, 2)
+
+  amenities Amenity[] @default([])
+
+  // --- Publication ---
+  status     ProjectStatus @default(DRAFT)
+  isVerified Boolean       @default(false)
+
+  /// IMMUTABLE once set, exactly as on Listing. A project re-approved after an
+  /// edit must not appear newly launched.
+  firstListedAt DateTime?
+
+  submittedAt  DateTime?
+  verifiedAt   DateTime?
+  verifiedById String?   @db.Uuid
+
+  rejectionReason String?
+  revisionNote    String?
+
+  viewsCount Int @default(0)
+  leadsCount Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  builder      User              @relation("BuilderProjects", fields: [builderId], references: [id])
+  verifiedBy   User?             @relation("VerifierProjects", fields: [verifiedById], references: [id])
+  neighborhood Neighborhood      @relation(fields: [neighborhoodId], references: [id])
+  units         ProjectUnit[]
+  photos        ProjectPhoto[]
+  documents     ProjectDocument[]
+  verifications Verification[]
+
+  @@index([status, firstListedAt])
+  @@index([builderId, status])
+  @@index([neighborhoodId])
+  @@index([stage])
+  @@map("projects")
+}
+
+/// One configuration within a project — "3 BHK, 1,650 sq ft, from ₹1.4 Cr".
+///
+/// Price is a starting figure, not an asking price: units differ by floor,
+/// facing and view, and a builder quotes "from". Calling the column `priceFrom`
+/// rather than `price` keeps that honest wherever it is rendered.
+model ProjectUnit {
+  id        String @id @default(uuid()) @db.Uuid
+  projectId String @db.Uuid
+
+  bedrooms  Int
+  bathrooms Int
+  balconies Int?
+
+  areaSqft       Int
+  carpetAreaSqft Int?
+
+  priceFrom Decimal @db.Decimal(14, 2)
+
+  /// How many of this configuration exist, and how many remain unsold. A
+  /// delivered project usually has zero available and is shown as track record.
+  totalUnits     Int?
+  availableUnits Int?
+
+  /// Floor plan image, in the public bucket.
+  floorPlanKey String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([bedrooms])
+  @@index([priceFrom])
+  @@map("project_units")
+}
+
+model ProjectPhoto {
+  id        String @id @default(uuid()) @db.Uuid
+  projectId String @db.Uuid
+
+  storageKey String
+  sortOrder  Int    @default(0)
+  /// Elevation render, site progress photograph, clubhouse, and so on. Buyers
+  /// treat a render and a real construction photograph very differently, so the
+  /// distinction is recorded rather than left to the caption.
+  isRender   Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, sortOrder])
+  @@map("project_photos")
+}
+
+/// Statutory documents for a project. Encrypted at rest exactly like the
+/// ownership documents on a resale listing, and readable only by staff.
+model ProjectDocument {
+  id        String @id @default(uuid()) @db.Uuid
+  projectId String @db.Uuid
+
+  kind DocumentKind
+
+  storageKey       String
+  originalFilename String
+  mimeType         String
+  sizeBytes        Int
+
+  encryptionIv  String
+  encryptionTag String
+
+  uploadedById String    @db.Uuid
+  deletedAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  uploadedBy User    @relation(fields: [uploadedById], references: [id])
+
+  @@index([projectId])
+  @@map("project_documents")
+}
+
+/// One-time codes for phone verification.
+///
+/// The code itself is never stored — only a hash, exactly like a password. An
+/// OTP is a credential for the few minutes it lives, and a leaked database
+/// dump should not let anyone replay one.
+///
+/// `attempts` is what stops a six-digit code being brute-forced: a million
+/// guesses is minutes of scripted work, so the row is burned after a handful of
+/// wrong answers rather than relying on rate limiting alone.
+model PhoneVerification {
+  id        String @id @default(uuid()) @db.Uuid
+  /// E.164. Not a user relation — a phone is verified before the account it
+  /// will belong to necessarily exists.
+  phone     String
+  codeHash  String
+
+  attempts  Int      @default(0)
+  expiresAt DateTime
+  /// Set when the code is successfully used, so it cannot be replayed.
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([phone, createdAt])
+  @@index([expiresAt])
+  @@map("phone_verifications")
+}
+
+/// A buyer's shortlist.
+///
+/// Server-side rather than in browser storage because the PRD requires the list
+/// to persist "across sessions and devices" — someone who shortlists on their
+/// phone during a commute expects to find it on their laptop that evening.
+///
+/// Deliberately has no `deletedAt`: unsaving is not an event anyone needs a
+/// record of, and keeping tombstones of what a buyer briefly considered would
+/// be collecting personal data with no purpose.
+model SavedListing {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  listingId String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  /// Saving twice is the same as saving once. The unique constraint makes the
+  /// save endpoint idempotent at the database level rather than relying on the
+  /// application to check first, which would race under a double-click.
+  @@unique([userId, listingId])
+  /// Serves the shortlist query directly: one user's saves, newest first.
+  @@index([userId, createdAt])
+  @@index([listingId])
+  @@map("saved_listings")
+}
+
+// ----------------------------------------------------------------------------
+// Documents
+//
+// The highest-risk data on the platform. Encrypted by the API before upload so
+// the storage provider never holds plaintext; served only through short-lived
+// presigned URLs; every access logged.
+// ----------------------------------------------------------------------------
+
+model Document {
+  id           String @id @default(uuid()) @db.Uuid
+  listingId    String @db.Uuid
+  uploadedById String @db.Uuid
+
+  kind        DocumentKind
+  /// Set only when kind is ID_PROOF.
+  idProofKind IdProofKind?
+
+  /// Object key in the PRIVATE documents bucket. Never CDN-fronted.
+  storageKey String @unique
+
+  /// AES-256-GCM parameters. The key itself lives in the secrets manager, never
+  /// in this table.
+  encryptionIv  String
+  encryptionTag String
+
+  originalFilename String
+  mimeType         String
+  sizeBytes        Int
+
+  /// DPDPA data minimisation: documents are deleted after the verification
+  /// decision plus a dispute window. The decision and audit trail are retained
+  /// permanently; the document is not.
+  retainUntil DateTime?
+  deletedAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  listing    Listing             @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  uploadedBy User                @relation(fields: [uploadedById], references: [id])
+  accesses   DocumentAccessLog[]
+
+  @@index([listingId])
+  @@index([uploadedById])
+  @@index([retainUntil])
+  @@map("documents")
+}
+
+/// Written on every read of a document, including previews. Answers "who looked
+/// at this person's ID proof, and when".
+model DocumentAccessLog {
+  id         String @id @default(uuid()) @db.Uuid
+  documentId String @db.Uuid
+  userId     String @db.Uuid
+
+  ipAddress  String?
+  userAgent  String?
+  accessedAt DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@index([documentId, accessedAt])
+  @@index([userId])
+  @@map("document_access_logs")
+}
+
+// ----------------------------------------------------------------------------
+// Verification
+// ----------------------------------------------------------------------------
+
+/// A verification decision against either a resale listing or a builder project.
+///
+/// One table rather than two, with exactly one of `listingId` / `projectId` set
+/// — enforced by a CHECK constraint in the migration, not just by convention.
+/// An officer's history and the audit trail stay in one place, and a second
+/// near-identical table would have meant duplicating VerificationCheckResult
+/// alongside it.
+model Verification {
+  id         String  @id @default(uuid()) @db.Uuid
+  listingId  String? @db.Uuid
+  projectId  String? @db.Uuid
+  verifierId String  @db.Uuid
+
+  decision VerificationDecision
+
+  /// Mandatory for REJECTED and REVISION_REQUESTED; enforced in the service
+  /// layer. Shown to the seller.
+  reason        String?
+  /// Never leaves the admin surface.
+  internalNotes String?
+
+  createdAt DateTime @default(now())
+
+  listing  Listing?                  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  project  Project?                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  verifier User                      @relation(fields: [verifierId], references: [id])
+  checks   VerificationCheckResult[]
+
+  @@index([listingId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([verifierId])
+  @@map("verifications")
+}
+
+/// The public checklist. Rows rather than a JSON blob so buyers can be shown
+/// precisely which checks passed, and when — with no login required.
+model VerificationCheckResult {
+  id             String @id @default(uuid()) @db.Uuid
+  verificationId String @db.Uuid
+
+  kind   VerificationCheckKind
+  passed Boolean
+  /// Optional public-safe note, e.g. "EC not required for this property type".
+  note   String?
+
+  verification Verification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+
+  @@unique([verificationId, kind])
+  @@map("verification_check_results")
+}
+
+// ----------------------------------------------------------------------------
+// Leads
+//
+// A buyer's phone number is visible ONLY to the seller of the listing they
+// contacted. It is never bulk-exported, never shared with other sellers, and
+// never sold. This is the platform's core promise.
+// ----------------------------------------------------------------------------
+
+model Lead {
+  id        String  @id @default(uuid()) @db.Uuid
+  listingId String  @db.Uuid
+  /// Null when submitted without an account — low-friction capture is a
+  /// deliberate requirement.
+  buyerId   String? @db.Uuid
+
+  name    String
+  phone   String
+  email   String?
+  message String?
+
+  status      LeadStatus @default(NEW)
+  contactedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  buyer   User?   @relation(fields: [buyerId], references: [id])
+
+  @@index([listingId, createdAt])
+  @@index([buyerId])
+  @@index([status])
+  @@map("leads")
+}
+
+// ----------------------------------------------------------------------------
+// Reports
+//
+// Every incumbent is criticised for unreachable support and complaints that
+// vanish. Reports are tickets with a status the reporter can see.
+// ----------------------------------------------------------------------------
+
+model ListingReport {
+  id         String  @id @default(uuid()) @db.Uuid
+  listingId  String  @db.Uuid
+  reporterId String? @db.Uuid
+
+  reason  ReportReason
+  details String?
+
+  status         ReportStatus @default(OPEN)
+  resolutionNote String?
+  resolvedById   String?      @db.Uuid
+  resolvedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  listing    Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  reporter   User?   @relation("ReporterReports", fields: [reporterId], references: [id])
+  resolvedBy User?   @relation("ResolverReports", fields: [resolvedById], references: [id])
+
+  @@index([listingId])
+  @@index([status, createdAt])
+  @@map("listing_reports")
+}
+
+// ----------------------------------------------------------------------------
+// Audit
+// ----------------------------------------------------------------------------
+
+/// Append-only business record, distinct from application logs and retained
+/// independently of log retention. There is no update or delete path.
+model AuditLog {
+  id      String  @id @default(uuid()) @db.Uuid
+  /// Null for system-initiated actions.
+  actorId String? @db.Uuid
+
+  /// Stable machine-readable verb, e.g. "listing.approved".
+  action     String
+  entityType String
+  entityId   String
+
+  metadata Json?
+
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}

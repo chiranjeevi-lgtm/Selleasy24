@@ -1,0 +1,45 @@
+{
+  "name": "kamalainfra-digital-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kamala Infra — trust-first PropTech platform for the Telangana residential market",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "infra:reset": "docker compose down -v && docker compose up -d",
+    "db:generate": "npm run generate --workspace @kamala/db",
+    "db:migrate": "npm run migrate:dev --workspace @kamala/db",
+    "db:deploy": "npm run migrate:deploy --workspace @kamala/db",
+    "db:seed": "npm run seed --workspace @kamala/db",
+    "db:studio": "npm run studio --workspace @kamala/db",
+    "dev:api": "npm run dev --workspace @kamala/api",
+    "dev:web": "npm run dev --workspace @kamala/web",
+    "dev:admin": "npm run dev --workspace @kamala/admin",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:env": "node scripts/setup-test-env.mjs",
+    "test:db": "node scripts/prepare-test-db.mjs",
+    "// test setup": "Creates .env.test and the *_test database. Safe to re-run.",
+    "test:setup": "npm run test:env && npm run test:db",
+    "// test": "Schema is brought up to date first, so a new migration cannot make the suite fail for the wrong reason",
+    "test": "npm run test:db && npm run test --workspaces --if-present",
+    "// build order": "@kamala/db must be compiled before anything that imports it",
+    "build": "npm run build --workspace @kamala/db && npm run build --workspace @kamala/api",
+    "build:db": "npm run build --workspace @kamala/db",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md,prisma}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md,prisma}\"",
+    "db:seed:demo": "npm run seed:demo --workspace @kamala/db"
+  },
+  "devDependencies": {
+    "pg": "^8.23.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3"
+  }
+}

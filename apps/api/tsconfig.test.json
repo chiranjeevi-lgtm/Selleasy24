@@ -1,0 +1,15 @@
+{
+  // Tests are not part of the build: the main config has rootDir "./src" and an
+  // explicit `types` allowlist that excludes jest, so test files neither compile
+  // nor typecheck under it.
+  //
+  // Separate rather than relaxed, so nothing in the shipped build can
+  // accidentally import a test helper or rely on jest globals.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node", "express", "multer", "jest"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

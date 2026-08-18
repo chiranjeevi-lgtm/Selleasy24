@@ -1,0 +1,14 @@
+{
+  // Seed scripts run through tsx, which strips types without checking them.
+  // Nothing was checking these files, so a syntax error in demo-seed.ts survived
+  // until it was run. This config exists to catch that at `npm run typecheck`.
+  //
+  // Separate from tsconfig.json because the package build has rootDir "./src" —
+  // adding prisma/ to that config makes every seed file a rootDir violation.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["prisma/**/*.ts"]
+}

@@ -1,0 +1,48 @@
+# Local development infrastructure only.
+# Production uses DigitalOcean Managed PostgreSQL and Managed Caching —
+# see docs/DEPLOYMENT.md.
+services:
+  postgres:
+    # postgis image ships PostgreSQL 16 with PostGIS preinstalled, matching the
+    # production extension set so local and deployed schemas stay identical.
+    image: postgis/postgis:16-3.4
+    container_name: kamala-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kamala
+      POSTGRES_PASSWORD: kamala_dev_password
+      POSTGRES_DB: kamala
+    ports:
+      # Deliberately non-default host port. 5432-5434 are claimed by other
+      # projects on this machine (whatsapp-tool-db, aqualab-db, crm, kamala-crm),
+      # including stopped containers that still hold their binding. Override
+      # with POSTGRES_PORT if 5442 ever conflicts.
+      - '${POSTGRES_PORT:-5442}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U kamala -d kamala']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: kamala-redis
+    restart: unless-stopped
+    # Persist queue state across restarts so in-flight jobs survive a dev reboot.
+    command: redis-server --appendonly yes
+    ports:
+      # Non-default host port to stay clear of any other local Redis.
+      - '${REDIS_PORT:-6382}:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  redis_data:
