@@ -22,6 +22,17 @@ export const AuditAction = {
   LISTING_REJECTED: 'listing.rejected',
   LISTING_REVISION_REQUESTED: 'listing.revision_requested',
   LISTING_PRICE_CHANGED: 'listing.price_changed',
+  LISTING_PAUSED: 'listing.paused',
+  LISTING_RESUMED: 'listing.resumed',
+  LISTING_SOLD: 'listing.sold',
+
+  // Builder projects
+  PROJECT_CREATED: 'project.created',
+  PROJECT_UPDATED: 'project.updated',
+  PROJECT_SUBMITTED: 'project.submitted',
+  PROJECT_APPROVED: 'project.approved',
+  PROJECT_REJECTED: 'project.rejected',
+  PROJECT_REVISION_REQUESTED: 'project.revision_requested',
 
   // Documents — every read is recorded, not just decisions
   DOCUMENT_UPLOADED: 'document.uploaded',

@@ -35,12 +35,28 @@ export class JwtAuthGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    if (isPublic) {
-      return true;
-    }
 
     const request = context.switchToHttp().getRequest<Request & { user?: AuthenticatedUser }>();
     const token = this.extractBearerToken(request);
+
+    /**
+     * Public routes: identify the caller if we can, but never reject.
+     *
+     * Several public handlers want to know who is asking without requiring it —
+     * a listing detail page counts views, and a seller refreshing their own
+     * listing should not inflate that number. Returning early here left
+     * `request.user` permanently undefined, so those checks compared
+     * `undefined !== sellerId` and silently never fired.
+     *
+     * A missing, malformed or expired token is simply an anonymous visitor.
+     * Nothing on a public route may depend on the user being present.
+     */
+    if (isPublic) {
+      if (token) {
+        request.user = (await this.identify(token)) ?? undefined;
+      }
+      return true;
+    }
 
     if (!token) {
       throw new UnauthorizedException('Authentication required.');
@@ -86,6 +102,38 @@ export class JwtAuthGuard implements CanActivate {
     // immediately and a stale token cannot retain elevated privileges.
     request.user = { id: user.id, role: user.role };
     return true;
+  }
+
+  /**
+   * Best-effort identification for a public route.
+   *
+   * Deliberately returns null on every failure instead of throwing. It applies
+   * the same active-account check as the strict path, so a suspended user is
+   * anonymous here rather than partially recognised.
+   */
+  private async identify(token: string): Promise<AuthenticatedUser | null> {
+    try {
+      const payload = await this.jwt.verifyAsync<AccessTokenPayload>(token, {
+        secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
+      });
+
+      if (payload.typ !== 'access') {
+        return null;
+      }
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: { id: true, role: true, isActive: true },
+      });
+
+      if (!user || !user.isActive) {
+        return null;
+      }
+
+      return { id: user.id, role: user.role };
+    } catch {
+      return null;
+    }
   }
 
   private extractBearerToken(request: Request): string | null {

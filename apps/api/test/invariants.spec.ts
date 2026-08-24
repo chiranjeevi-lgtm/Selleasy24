@@ -520,4 +520,61 @@ describe('data invariants', () => {
       expect(JSON.stringify(response.body)).toMatch(/RERA/i);
     });
   });
+
+  /**
+   * View counts have to mean something.
+   *
+   * The listing detail route is public, so it identifies the caller only if a
+   * token happens to be supplied. That identification is what stops a seller
+   * refreshing their own listing all afternoon and reading the result as buyer
+   * interest — the number drives what they do about the price.
+   */
+  describe('view counts', () => {
+    async function published(seller: TestUser): Promise<string> {
+      const listingId = await makeListing(seller);
+      await approve(listingId).expect(200);
+      return listingId;
+    }
+
+    it('counts one view per viewer per day', async () => {
+      const seller = await createUser({ role: Role.OWNER, sellerKind: SellerKind.OWNER });
+      const listingId = await published(seller);
+
+      await http().get(`/api/listings/${listingId}`).expect(200);
+      await http().get(`/api/listings/${listingId}`).expect(200);
+
+      const stored = await db().listing.findUniqueOrThrow({ where: { id: listingId } });
+      expect(stored.viewsCount).toBe(1);
+    });
+
+    it('does not count the seller’s own views', async () => {
+      const seller = await createUser({ role: Role.OWNER, sellerKind: SellerKind.OWNER });
+      const listingId = await published(seller);
+
+      await http()
+        .get(`/api/listings/${listingId}`)
+        .set(...bearer(seller))
+        .expect(200);
+
+      const stored = await db().listing.findUniqueOrThrow({ where: { id: listingId } });
+      expect(stored.viewsCount).toBe(0);
+    });
+
+    /**
+     * A public route must never reject a bad token — an expired session while
+     * browsing is an anonymous visitor, not an error page.
+     */
+    it('serves a public page to a caller holding an expired token', async () => {
+      const seller = await createUser({ role: Role.OWNER, sellerKind: SellerKind.OWNER });
+      const listingId = await published(seller);
+
+      await http()
+        .get(`/api/listings/${listingId}`)
+        .set('Authorization', 'Bearer not-a-real-token')
+        .expect(200);
+
+      const stored = await db().listing.findUniqueOrThrow({ where: { id: listingId } });
+      expect(stored.viewsCount).toBe(1);
+    });
+  });
 });

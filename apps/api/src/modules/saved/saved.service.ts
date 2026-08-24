@@ -126,14 +126,34 @@ export class SavedService {
     };
   }
 
+  /**
+   * Why a shortlisted home is no longer showing, in plain words.
+   *
+   * The raw status is never returned: "SUSPENDED" means nothing to a buyer, and
+   * the difference between archived and withdrawn is our bookkeeping, not
+   * theirs. But the difference between *sold* and *temporarily unavailable* is
+   * very much theirs — one means stop waiting, the other means check back.
+   *
+   * Every status is listed rather than leaning on `default`. A new status
+   * arriving and silently inheriting "being re-checked" is exactly how a
+   * shortlist ends up telling someone a sold house is still in the running.
+   */
   private unavailableReason(status: ListingStatus): string {
     switch (status) {
+      case ListingStatus.SOLD:
+        return 'This home has been sold.';
+      case ListingStatus.PAUSED:
+        return 'The owner has taken this off the market for now.';
       case ListingStatus.ARCHIVED:
         return 'This home is no longer on the market.';
       case ListingStatus.SUSPENDED:
         return 'This listing has been withdrawn while we look into it.';
-      default:
-        // Back under review after an edit, so it is temporarily not public.
+      case ListingStatus.DRAFT:
+      case ListingStatus.PENDING_REVIEW:
+      case ListingStatus.REJECTED:
+      case ListingStatus.APPROVED:
+        // APPROVED reaches here only when `isVerified` is false — the listing
+        // is back under review after an edit, so it is temporarily not public.
         return 'This listing is being re-checked and is not visible right now.';
     }
   }

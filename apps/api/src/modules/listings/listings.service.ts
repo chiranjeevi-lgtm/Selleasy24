@@ -5,7 +5,13 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { DocumentKind, ListingStatus, Prisma, type Listing } from '@kamala/db';
+import {
+  DocumentKind,
+  ListingStatus,
+  Prisma,
+  SiteVisitStatus,
+  type Listing,
+} from '@kamala/db';
 import { randomUUID } from 'node:crypto';
 
 import { AuditAction, AuditService } from '../../common/audit/audit.service';
@@ -23,6 +29,7 @@ import {
   SELLER_LISTING_FIELDS,
   SELLER_PROPERTY_FIELDS,
   type CreateListingDto,
+  type MarkSoldDto,
   type UpdateListingDto,
 } from './listings.dto';
 
@@ -462,6 +469,179 @@ export class ListingsService {
   }
 
   // -------------------------------------------------------------------------
+  // Taking a listing off the market
+  // -------------------------------------------------------------------------
+
+  /**
+   * Hides a live listing without ending it.
+   *
+   * Only an APPROVED listing can be paused — nothing else is visible to a buyer,
+   * so there is nothing to hide.
+   */
+  async pause(
+    sellerId: string,
+    listingId: string,
+    reason: string | undefined,
+    ctx: RequestContext,
+  ): Promise<Listing> {
+    const listing = await this.assertOwnedBySeller(listingId, sellerId);
+
+    if (listing.status !== ListingStatus.APPROVED) {
+      throw new BadRequestException(
+        listing.status === ListingStatus.PAUSED
+          ? 'This listing is already paused.'
+          : 'Only a live listing can be paused.',
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const paused = await tx.listing.update({
+        where: { id: listingId },
+        data: { status: ListingStatus.PAUSED, pausedReason: reason ?? null },
+      });
+
+      await this.audit.recordInTransaction(tx, {
+        actorId: sellerId,
+        action: AuditAction.LISTING_PAUSED,
+        entityType: 'listing',
+        entityId: listingId,
+        metadata: { reason: reason ?? null },
+        ipAddress: ctx.ip ?? null,
+        userAgent: ctx.userAgent ?? null,
+      });
+
+      return paused;
+    });
+  }
+
+  /**
+   * Puts a paused listing back.
+   *
+   * Deliberately does NOT re-queue it for verification. Nothing about the
+   * property changed while it was away, so the documents an officer already
+   * checked still describe it — and making a seller wait through another review
+   * would tax the exact behaviour we want, which is taking a listing down
+   * promptly rather than leaving a stale one up.
+   *
+   * `isVerified` is untouched for the same reason: the badge records that a
+   * human checked these documents against this property, and that remains true.
+   */
+  async resume(sellerId: string, listingId: string, ctx: RequestContext): Promise<Listing> {
+    const listing = await this.assertOwnedBySeller(listingId, sellerId);
+
+    if (listing.status !== ListingStatus.PAUSED) {
+      throw new BadRequestException('Only a paused listing can be put back.');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const resumed = await tx.listing.update({
+        where: { id: listingId },
+        data: {
+          status: ListingStatus.APPROVED,
+          pausedReason: null,
+          // Putting it back is itself an assertion that it is available again,
+          // so the public "confirmed N days ago" signal starts afresh.
+          lastConfirmedAt: new Date(),
+        },
+      });
+
+      await this.audit.recordInTransaction(tx, {
+        actorId: sellerId,
+        action: AuditAction.LISTING_RESUMED,
+        entityType: 'listing',
+        entityId: listingId,
+        ipAddress: ctx.ip ?? null,
+        userAgent: ctx.userAgent ?? null,
+      });
+
+      return resumed;
+    });
+  }
+
+  /**
+   * Records that the property sold.
+   *
+   * Terminal, and it tidies up after itself: anyone with an open request to
+   * visit is told, rather than being left to turn up at a property that is no
+   * longer for sale. A request going quiet is the complaint buyers make most
+   * about the incumbents, and selling is no excuse for it.
+   */
+  async markSold(
+    sellerId: string,
+    listingId: string,
+    dto: MarkSoldDto,
+    ctx: RequestContext,
+  ): Promise<Listing> {
+    const listing = await this.assertOwnedBySeller(listingId, sellerId);
+
+    if (listing.status === ListingStatus.SOLD) {
+      throw new BadRequestException('This listing is already marked sold.');
+    }
+
+    // A listing that never went live cannot have sold through this platform,
+    // and letting a draft jump straight to SOLD would corrupt every figure
+    // derived from the sale record.
+    if (
+      listing.status !== ListingStatus.APPROVED &&
+      listing.status !== ListingStatus.PAUSED
+    ) {
+      throw new BadRequestException(
+        'Only a live or paused listing can be marked sold.',
+      );
+    }
+
+    const now = new Date();
+
+    return this.prisma.$transaction(async (tx) => {
+      const sold = await tx.listing.update({
+        where: { id: listingId },
+        data: {
+          status: ListingStatus.SOLD,
+          soldAt: now,
+          soldPrice: dto.soldPrice === undefined ? null : new Prisma.Decimal(dto.soldPrice),
+          soldThroughPlatform: dto.soldThroughPlatform ?? null,
+          pausedReason: null,
+        },
+      });
+
+      /*
+       * Close anything still open. CANCELLED rather than DECLINED: the seller is
+       * not turning this buyer down, the property has gone — and the note says
+       * so, because "cancelled" on its own tells them nothing.
+       */
+      const closed = await tx.siteVisitRequest.updateMany({
+        where: {
+          listingId,
+          status: { in: [SiteVisitStatus.REQUESTED, SiteVisitStatus.RESCHEDULED, SiteVisitStatus.CONFIRMED] },
+        },
+        data: {
+          status: SiteVisitStatus.CANCELLED,
+          sellerNote: 'This property has been sold.',
+        },
+      });
+
+      await this.audit.recordInTransaction(tx, {
+        actorId: sellerId,
+        action: AuditAction.LISTING_SOLD,
+        entityType: 'listing',
+        entityId: listingId,
+        metadata: {
+          // The price is recorded in the audit trail as well, because it is the
+          // one figure here that can never be reconstructed after the fact.
+          soldPrice: dto.soldPrice ?? null,
+          soldThroughPlatform: dto.soldThroughPlatform ?? null,
+          askingPrice: listing.price.toString(),
+          visitsCancelled: closed.count,
+        },
+        ipAddress: ctx.ip ?? null,
+        userAgent: ctx.userAgent ?? null,
+      });
+
+      return sold;
+    });
+  }
+
+  // -------------------------------------------------------------------------
   // Seller views
   // -------------------------------------------------------------------------
 
@@ -556,6 +736,151 @@ export class ListingsService {
       // Seller-facing only. Buyers are never shown a score — it would read as a
       // quality rating of the property rather than of the paperwork.
       completeness: scoreCompleteness(listing.property),
+    };
+  }
+
+  /**
+   * Performance figures for a seller's own listings.
+   *
+   * Three numbers a seller actually acts on: how many people looked, how many
+   * shortlisted, and how many made contact. Shortlists matter most — someone
+   * who saved a property and did not enquire is interested but hesitating, and
+   * that is the gap a price change or better photographs closes.
+   *
+   * Counts only, never identities. A seller learning *who* shortlisted their
+   * property would be a privacy breach and would invite exactly the cold-calling
+   * this platform exists to avoid; the buyer chose not to make contact.
+   */
+  async stats(sellerId: string, days: number) {
+    const since = new Date();
+    since.setUTCHours(0, 0, 0, 0);
+    since.setUTCDate(since.getUTCDate() - (days - 1));
+
+    const listings = await this.prisma.listing.findMany({
+      where: { sellerId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        isVerified: true,
+        price: true,
+        firstListedAt: true,
+        photos: {
+          select: { storageKey: true },
+          orderBy: { sortOrder: 'asc' },
+          take: 1,
+        },
+        property: {
+          select: { bedrooms: true, areaSqft: true, neighborhood: { select: { name: true } } },
+        },
+      },
+    });
+
+    if (listings.length === 0) {
+      return {
+        rangeDays: days,
+        totals: { views: 0, saves: 0, leads: 0, live: 0 },
+        daily: [],
+        listings: [],
+      };
+    }
+
+    const ids = listings.map((listing) => listing.id);
+
+    /*
+     * Grouped aggregates rather than a count per listing. A seller with thirty
+     * properties would otherwise mean ninety queries, and the page would get
+     * slower the more successful they became.
+     */
+    const [viewGroups, leadGroups, saveGroups, viewDays, leadRows] = await Promise.all([
+      this.prisma.listingView.groupBy({
+        by: ['listingId'],
+        where: { listingId: { in: ids }, viewedOn: { gte: since } },
+        _count: { _all: true },
+      }),
+      this.prisma.lead.groupBy({
+        by: ['listingId'],
+        where: { listingId: { in: ids }, createdAt: { gte: since } },
+        _count: { _all: true },
+      }),
+      this.prisma.savedListing.groupBy({
+        by: ['listingId'],
+        where: { listingId: { in: ids } },
+        _count: { _all: true },
+      }),
+      this.prisma.listingView.groupBy({
+        by: ['viewedOn'],
+        where: { listingId: { in: ids }, viewedOn: { gte: since } },
+        _count: { _all: true },
+      }),
+      this.prisma.lead.findMany({
+        where: { listingId: { in: ids }, createdAt: { gte: since } },
+        select: { createdAt: true },
+      }),
+    ]);
+
+    const viewsById = new Map(viewGroups.map((row) => [row.listingId, row._count._all]));
+    const leadsById = new Map(leadGroups.map((row) => [row.listingId, row._count._all]));
+    // Saves are a running total, not windowed: a shortlist from six weeks ago is
+    // still a person holding this property in mind.
+    const savesById = new Map(saveGroups.map((row) => [row.listingId, row._count._all]));
+
+    // --- Daily series -------------------------------------------------------
+    const dayKey = (date: Date): string => date.toISOString().slice(0, 10);
+    const viewsByDay = new Map(viewDays.map((row) => [dayKey(row.viewedOn), row._count._all]));
+
+    const leadsByDay = new Map<string, number>();
+    for (const lead of leadRows) {
+      const key = dayKey(lead.createdAt);
+      leadsByDay.set(key, (leadsByDay.get(key) ?? 0) + 1);
+    }
+
+    /*
+     * Every day in the window is emitted, including empty ones. A chart drawn
+     * only from days that had traffic silently compresses the quiet stretches
+     * and makes a flat week look busy.
+     */
+    const daily: Array<{ date: string; views: number; leads: number }> = [];
+    for (let offset = 0; offset < days; offset += 1) {
+      const day = new Date(since);
+      day.setUTCDate(day.getUTCDate() + offset);
+      const key = dayKey(day);
+      daily.push({
+        date: key,
+        views: viewsByDay.get(key) ?? 0,
+        leads: leadsByDay.get(key) ?? 0,
+      });
+    }
+
+    const perListing = listings.map((listing) => ({
+      id: listing.id,
+      title: listing.title,
+      status: listing.status,
+      isVerified: listing.isVerified,
+      price: Number(listing.price),
+      firstListedAt: listing.firstListedAt,
+      locality: listing.property.neighborhood.name,
+      bedrooms: listing.property.bedrooms,
+      areaSqft: listing.property.areaSqft,
+      photo: listing.photos[0] ? this.storage.publicUrl(listing.photos[0].storageKey) : null,
+      views: viewsById.get(listing.id) ?? 0,
+      saves: savesById.get(listing.id) ?? 0,
+      leads: leadsById.get(listing.id) ?? 0,
+    }));
+
+    return {
+      rangeDays: days,
+      totals: {
+        views: perListing.reduce((sum, item) => sum + item.views, 0),
+        saves: perListing.reduce((sum, item) => sum + item.saves, 0),
+        leads: perListing.reduce((sum, item) => sum + item.leads, 0),
+        live: listings.filter(
+          (listing) => listing.status === ListingStatus.APPROVED && listing.isVerified,
+        ).length,
+      },
+      daily,
+      listings: perListing,
     };
   }
 

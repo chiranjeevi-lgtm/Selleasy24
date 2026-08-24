@@ -1,4 +1,4 @@
-import { ListingStatus, Prisma } from '@prisma/client';
+import { ListingStatus, Prisma, ProjectStatus } from '@prisma/client';
 
 export * from '@prisma/client';
 export { PrismaClient } from '@prisma/client';
@@ -117,3 +117,98 @@ export const PUBLIC_LISTING_DETAIL_SELECT = {
     },
   },
 } satisfies Prisma.ListingSelect;
+
+// ----------------------------------------------------------------------------
+// Builder projects
+// ----------------------------------------------------------------------------
+
+/**
+ * The ONLY condition under which a project may be shown publicly.
+ *
+ * Same rule and same reasoning as {@link PUBLIC_LISTING_WHERE}, and it matters
+ * more here rather than less: advertising an unregistered project is illegal in
+ * Telangana, so an unreviewed project reaching a buyer is a regulatory problem
+ * on top of a trust one.
+ */
+export const PUBLIC_PROJECT_WHERE = {
+  status: ProjectStatus.APPROVED,
+  isVerified: true,
+} satisfies Prisma.ProjectWhereInput;
+
+/**
+ * Composes additional filters onto the public project visibility rule.
+ *
+ * Visibility conditions spread last, so a caller cannot widen them.
+ */
+export function publicProjectWhere(
+  extra: Prisma.ProjectWhereInput = {},
+): Prisma.ProjectWhereInput {
+  return { ...extra, ...PUBLIC_PROJECT_WHERE };
+}
+
+/**
+ * Fields safe to return on a public project response.
+ *
+ * Omits `rejectionReason`, `revisionNote` and `verifiedById` for the same reason
+ * as the listing select. `reraNumber` is deliberately present: it is a public
+ * register entry, and showing it is the point — MagicBricks puts the same data
+ * behind a lead-capture wall.
+ */
+export const PUBLIC_PROJECT_SELECT = {
+  id: true,
+  name: true,
+  stage: true,
+  address: true,
+  pincode: true,
+  possessionDate: true,
+  deliveredOn: true,
+  reraNumber: true,
+  isVerified: true,
+  firstListedAt: true,
+  verifiedAt: true,
+  totalTowers: true,
+  totalUnits: true,
+  neighborhood: {
+    select: { id: true, name: true, city: true, pincode: true },
+  },
+  photos: {
+    select: { id: true, storageKey: true, sortOrder: true, isRender: true },
+    orderBy: { sortOrder: 'asc' },
+  },
+  /*
+   * Only what a card renders. `priceFrom` across the units is what produces the
+   * "from ₹1.4 Cr" headline, and bedrooms produce the "2, 3 BHK" line — so both
+   * are needed even in a list response.
+   */
+  units: {
+    select: { id: true, bedrooms: true, areaSqft: true, priceFrom: true },
+    orderBy: { priceFrom: 'asc' },
+  },
+  builder: {
+    select: { id: true, fullName: true, reraNumber: true },
+  },
+} satisfies Prisma.ProjectSelect;
+
+/** Public detail — the card fields plus everything a decision needs. */
+export const PUBLIC_PROJECT_DETAIL_SELECT = {
+  ...PUBLIC_PROJECT_SELECT,
+  description: true,
+  landAreaAcres: true,
+  approvingAuthority: true,
+  amenities: true,
+  units: {
+    select: {
+      id: true,
+      bedrooms: true,
+      bathrooms: true,
+      balconies: true,
+      areaSqft: true,
+      carpetAreaSqft: true,
+      priceFrom: true,
+      totalUnits: true,
+      availableUnits: true,
+      floorPlanKey: true,
+    },
+    orderBy: { priceFrom: 'asc' },
+  },
+} satisfies Prisma.ProjectSelect;

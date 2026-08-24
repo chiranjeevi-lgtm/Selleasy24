@@ -144,6 +144,21 @@ enum ListingStatus {
   PENDING_REVIEW
   APPROVED
   REJECTED
+  /// Hidden by the seller, and reversible by them without another review.
+  ///
+  /// Distinct from ARCHIVED because it comes back. Nothing about the property
+  /// changed while it was away, so the documents an officer already checked
+  /// still describe it — making a seller re-queue would be a tax on the exact
+  /// behaviour we want, which is taking a listing down the moment it stops
+  /// being available rather than leaving it up.
+  PAUSED
+  /// Terminal. The property sold.
+  ///
+  /// A state of its own rather than ARCHIVED with a note: "sold" is the outcome
+  /// this platform exists to produce, it is the only status that can carry a
+  /// real transaction price, and conflating it with "withdrawn" would throw
+  /// away the one signal that says the marketplace worked.
+  SOLD
   ARCHIVED
   SUSPENDED
 }
@@ -246,12 +261,59 @@ enum ProjectStatus {
   SUSPENDED
 }
 
+/// Why a buyer is buying.
+///
+/// Deliberately residential only. The platform sells flats and houses in
+/// Telangana — there is no commercial inventory, and offering "commercial" as a
+/// purpose would collect a preference nothing can satisfy.
+///
+/// The distinction is not cosmetic: someone buying to live in it weighs schools,
+/// commute and possession date, while someone buying to let weighs rental yield
+/// and tenant demand. They should not be shown the same ranking.
+enum BuyingPurpose {
+  /// Buying a home to live in.
+  LIVE_IN
+  /// Buying to let out.
+  RENT_OUT
+  /// Buying to hold. Cares about appreciation more than liveability.
+  INVESTMENT
+}
+
+/// How a buyer earns, which is what a lender asks first.
+///
+/// An enum rather than free text so it can be filtered and reported on, and so
+/// the answer means the same thing for every buyer.
+enum Occupation {
+  SALARIED
+  SELF_EMPLOYED
+  BUSINESS_OWNER
+  /// Doctor, lawyer, chartered accountant and similar.
+  PROFESSIONAL
+  RETIRED
+  STUDENT
+  OTHER
+}
+
 enum LeadStatus {
   NEW
   CONTACTED
   INTERESTED
   NOT_INTERESTED
   CONVERTED
+}
+
+/// Where a site-visit request has got to.
+///
+/// `RESCHEDULED` is the seller proposing a different time rather than refusing
+/// outright — the common case when a slot does not suit, and collapsing it into
+/// DECLINED would lose a visit that was going to happen.
+enum SiteVisitStatus {
+  REQUESTED
+  CONFIRMED
+  RESCHEDULED
+  DECLINED
+  CANCELLED
+  COMPLETED
 }
 
 enum ReportReason {
@@ -307,7 +369,9 @@ model User {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  buyerProfile           BuyerProfile?
   savedListings          SavedListing[]
+  siteVisitRequests      SiteVisitRequest[]
   builderProjects        Project[]                @relation("BuilderProjects")
   verifiedProjects       Project[]                @relation("VerifierProjects")
   projectDocuments       ProjectDocument[]
@@ -413,13 +477,83 @@ model Neighborhood {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  properties Property[]
-  projects   Project[]
+  properties       Property[]
+  projects         Project[]
+  preferredByBuyers BuyerPreferredLocality[]
 
   @@unique([name, city, pincode])
   @@index([city])
   @@index([pincode])
   @@map("neighborhoods")
+}
+
+/// What a buyer told us they are looking for.
+///
+/// Collected over several short steps after registration rather than in one
+/// long form, and every step is skippable. A buyer who abandons partway leaves
+/// a partial row here, which is deliberate — half a preference still improves
+/// what we show them, and demanding all of it up front loses the account
+/// entirely.
+///
+/// Every field is nullable for the same reason. `completedAt` records whether
+/// they reached the end, so we can tell "chose not to answer" from "never got
+/// that far".
+model BuyerProfile {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @unique @db.Uuid
+
+  purpose BuyingPurpose?
+
+  /// How many people will live there. Drives the suggested bedroom count, which
+  /// the buyer can then override — a couple planning a family and a couple who
+  /// are not want different things from the same household size.
+  householdSize  Int?
+  bedroomsWanted Int?
+
+  /// Rupees. The figures a buyer gives are what recommendations rank against.
+  budgetMin Decimal? @db.Decimal(14, 2)
+  budgetMax Decimal? @db.Decimal(14, 2)
+
+  occupation Occupation?
+
+  /// Monthly income, in rupees. Optional and asked last, with a stated reason.
+  ///
+  /// This is financial personal data under the DPDPA and is not needed to rank
+  /// properties — budget already carries that signal. It exists only to say
+  /// what a bank is likely to lend, so it must never become a precondition for
+  /// using the platform, and it is never shown to a seller.
+  monthlyIncome Decimal? @db.Decimal(12, 2)
+
+  /// Set when the buyer reaches the end of the steps. Null means they skipped
+  /// out partway, which is a different thing from having no preferences.
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user       User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  localities BuyerPreferredLocality[]
+
+  @@map("buyer_profiles")
+}
+
+/// Localities a buyer wants to be in.
+///
+/// A join table rather than an array of ids: the localities are fixed reference
+/// data with their own rows, and a foreign key means a preference cannot point
+/// at a locality that does not exist.
+model BuyerPreferredLocality {
+  buyerProfileId String @db.Uuid
+  neighborhoodId String @db.Uuid
+
+  createdAt DateTime @default(now())
+
+  buyerProfile BuyerProfile @relation(fields: [buyerProfileId], references: [id], onDelete: Cascade)
+  neighborhood Neighborhood @relation(fields: [neighborhoodId], references: [id], onDelete: Cascade)
+
+  @@id([buyerProfileId, neighborhoodId])
+  @@index([neighborhoodId])
+  @@map("buyer_preferred_localities")
 }
 
 // ----------------------------------------------------------------------------
@@ -557,6 +691,24 @@ model Listing {
   rejectionReason String?
   revisionNote    String?
 
+  /// When the seller reported the sale. Only ever set alongside status SOLD.
+  soldAt DateTime?
+
+  /// What it actually sold for, if the seller chose to say.
+  ///
+  /// Optional, and asked for one reason: every price on this platform is an
+  /// asking price, and a locality median built from asking prices measures what
+  /// sellers hope for rather than what homes are worth. Nobody is required to
+  /// answer, and it is never shown against their listing.
+  soldPrice Decimal? @db.Decimal(14, 2)
+
+  /// Whether the buyer came from here. The honest measure of whether the
+  /// platform did its job, and unknowable unless we ask.
+  soldThroughPlatform Boolean?
+
+  /// Why the seller paused it. Shown back to them, never to a buyer.
+  pausedReason String?
+
   /// Counters are denormalised for read performance. ListingView and Lead are
   /// the sources of truth.
   viewsCount Int @default(0)
@@ -575,6 +727,7 @@ model Listing {
   priceHistory  PriceHistory[]
   views         ListingView[]
   reports       ListingReport[]
+  siteVisits    SiteVisitRequest[]
   savedBy       SavedListing[]
 
   // Composite index matching the public search path: approved listings,
@@ -723,6 +876,8 @@ model Project {
   photos        ProjectPhoto[]
   documents     ProjectDocument[]
   verifications Verification[]
+  views         ProjectView[]
+  leads         Lead[]
 
   @@index([status, firstListedAt])
   @@index([builderId, status])
@@ -761,11 +916,34 @@ model ProjectUnit {
   updatedAt DateTime @updatedAt
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// Enquiries that named this configuration. `SetNull` rather than cascade —
+  /// a builder reworking their unit mix must not delete the enquiries it drew.
+  leads   Lead[]
 
   @@index([projectId])
   @@index([bedrooms])
   @@index([priceFrom])
   @@map("project_units")
+}
+
+/// One row per unique viewer per day, so `Project.viewsCount` means something.
+///
+/// Exists for the same reason ListingView does. Without it a builder's dashboard
+/// would show a figure anyone could inflate by refreshing, which is worse than
+/// showing no figure — the whole point of the dashboard is a number the builder
+/// can act on.
+model ProjectView {
+  id          String   @id @default(uuid()) @db.Uuid
+  projectId   String   @db.Uuid
+  sessionHash String
+  viewedOn    DateTime @db.Date
+  viewedAt    DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, sessionHash, viewedOn])
+  @@index([projectId])
+  @@map("project_views")
 }
 
 model ProjectPhoto {
@@ -804,14 +982,56 @@ model ProjectDocument {
   encryptionTag String
 
   uploadedById String    @db.Uuid
+  /// Set once a decision has been made; a sweep destroys the bytes afterwards.
+  /// Same DPDPA minimisation rule as resale ownership documents.
+  retainUntil  DateTime?
   deletedAt    DateTime?
   createdAt    DateTime  @default(now())
 
   project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   uploadedBy User    @relation(fields: [uploadedById], references: [id])
+  accessLogs DocumentAccessLog[]
 
   @@index([projectId])
   @@map("project_documents")
+}
+
+/// A buyer asking to see a property in person.
+///
+/// `buyerId` is required, unlike on Lead. Arranging to meet a stranger at a
+/// property is a real-world commitment on both sides, so both parties are
+/// accounts rather than one being an anonymous phone number.
+model SiteVisitRequest {
+  id        String @id @default(uuid()) @db.Uuid
+  listingId String @db.Uuid
+  buyerId   String @db.Uuid
+
+  /// What the buyer asked for.
+  preferredAt DateTime
+  /// The seller's counter-proposal, when the requested slot does not suit.
+  proposedAt  DateTime?
+  /// The slot both sides settled on. Kept separate from the two above so the
+  /// negotiation remains readable after the fact.
+  confirmedAt DateTime?
+
+  status SiteVisitStatus @default(REQUESTED)
+
+  /// From the buyer when requesting.
+  note       String?
+  /// From the seller when responding. Shown to the buyer.
+  sellerNote String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  buyer   User    @relation(fields: [buyerId], references: [id])
+
+  /// The seller's inbox, newest first.
+  @@index([listingId, createdAt])
+  /// The buyer's own list of requests.
+  @@index([buyerId, createdAt])
+  @@map("site_visit_requests")
 }
 
 /// One-time codes for phone verification.
@@ -918,19 +1138,32 @@ model Document {
 
 /// Written on every read of a document, including previews. Answers "who looked
 /// at this person's ID proof, and when".
+/// Who read which document, and when.
+///
+/// Polymorphic over the two document tables, exactly as Verification is over
+/// listings and projects: a staff member reading a builder's land title needs
+/// the same forensic record as one reading a homeowner's sale deed, and a second
+/// log table would mean every "who accessed this person's documents" query had
+/// to remember to union both.
+///
+/// Exactly one of the two id columns is set, enforced by a CHECK constraint that
+/// Prisma cannot express — see the migration.
 model DocumentAccessLog {
-  id         String @id @default(uuid()) @db.Uuid
-  documentId String @db.Uuid
-  userId     String @db.Uuid
+  id                String  @id @default(uuid()) @db.Uuid
+  documentId        String? @db.Uuid
+  projectDocumentId String? @db.Uuid
+  userId            String  @db.Uuid
 
   ipAddress  String?
   userAgent  String?
   accessedAt DateTime @default(now())
 
-  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  user     User     @relation(fields: [userId], references: [id])
+  document        Document?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  projectDocument ProjectDocument? @relation(fields: [projectDocumentId], references: [id], onDelete: Cascade)
+  user            User             @relation(fields: [userId], references: [id])
 
   @@index([documentId, accessedAt])
+  @@index([projectDocumentId, accessedAt])
   @@index([userId])
   @@map("document_access_logs")
 }
@@ -998,9 +1231,26 @@ model VerificationCheckResult {
 // never sold. This is the platform's core promise.
 // ----------------------------------------------------------------------------
 
+/// A buyer getting in touch, about either a resale listing or a builder project.
+///
+/// Polymorphic over the two, exactly as Verification and DocumentAccessLog
+/// already are. A second `project_leads` table was the alternative and would
+/// have meant every "how many enquiries" query remembering to union both — the
+/// kind of omission that silently under-reports for months.
+///
+/// Exactly one of the two id columns is set, enforced by a CHECK constraint
+/// Prisma cannot express. See the migration.
 model Lead {
   id        String  @id @default(uuid()) @db.Uuid
-  listingId String  @db.Uuid
+  listingId String? @db.Uuid
+  projectId String? @db.Uuid
+  /// Which configuration they asked about, when it was a project.
+  ///
+  /// A project sells several at once, and "someone enquired" is far less useful
+  /// to a builder than "someone enquired about the 3 BHK" — it is the first
+  /// thing their sales team would ask.
+  projectUnitId String? @db.Uuid
+
   /// Null when submitted without an account — low-friction capture is a
   /// deliberate requirement.
   buyerId   String? @db.Uuid
@@ -1016,10 +1266,13 @@ model Lead {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  buyer   User?   @relation(fields: [buyerId], references: [id])
+  listing     Listing?     @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  project     Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectUnit ProjectUnit? @relation(fields: [projectUnitId], references: [id], onDelete: SetNull)
+  buyer       User?        @relation(fields: [buyerId], references: [id])
 
   @@index([listingId, createdAt])
+  @@index([projectId, createdAt])
   @@index([buyerId])
   @@index([status])
   @@map("leads")

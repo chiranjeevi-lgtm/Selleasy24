@@ -5,6 +5,8 @@ import type { Request } from 'express';
 
 import { Public, type AuthenticatedUser } from '../../common/auth/auth.decorators';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { projectSearchSchema, type ProjectSearchDto } from '../projects/projects.dto';
+import { ProjectsSearchService } from './projects-search.service';
 import {
   compareQuerySchema,
   searchQuerySchema,
@@ -27,7 +29,10 @@ import { SearchService } from './search.service';
 @Throttle({ default: { ttl: 60_000, limit: 60 } })
 @Controller()
 export class SearchController {
-  constructor(private readonly search: SearchService) {}
+  constructor(
+    private readonly search: SearchService,
+    private readonly projects: ProjectsSearchService,
+  ) {}
 
   @Get('localities')
   @ApiOperation({
@@ -89,6 +94,40 @@ export class SearchController {
       userAgent: req.headers['user-agent'],
       // Present only if a valid token happened to be supplied; used solely to
       // avoid counting a seller's views of their own listing.
+      userId: user?.id,
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // New construction
+  // -------------------------------------------------------------------------
+
+  /**
+   * Declared before the `:id` route below, same reasoning as listings/compare.
+   */
+  @Get('projects/search')
+  @ApiOperation({
+    summary: 'Search verified builder projects',
+    description:
+      'Returns only APPROVED and verified projects. Price and bedroom filters match against the project’s unit configurations, so "3 BHK under ₹1.5 Cr" matches a project offering one.',
+  })
+  async searchProjects(
+    @Query(new ZodValidationPipe(projectSearchSchema)) query: ProjectSearchDto,
+  ) {
+    return this.projects.search(query);
+  }
+
+  @Get('projects/:id([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})')
+  @ApiOperation({
+    summary: 'Public project detail',
+    description:
+      'Every configuration with its starting price and remaining inventory. Records one deduplicated view per viewer per day.',
+  })
+  async getProject(@Param('id', ParseUUIDPipe) id: string, @Req() req: Request) {
+    const user = (req as Request & { user?: AuthenticatedUser }).user;
+    return this.projects.getPublicProject(id, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
       userId: user?.id,
     });
   }

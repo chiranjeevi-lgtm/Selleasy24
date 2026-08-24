@@ -266,8 +266,50 @@ export const reorderPhotosSchema = z.object({
 
 export type ReorderPhotosDto = z.infer<typeof reorderPhotosSchema>;
 
+/**
+ * Window for the seller's performance figures.
+ *
+ * Capped at a year: the series returns one row per day, and an unbounded range
+ * would let a single request build an arbitrarily large response.
+ */
+export const statsQuerySchema = z.object({
+  days: z.coerce.number().int().min(7).max(365).default(30),
+});
+
+export type StatsQueryDto = z.infer<typeof statsQuerySchema>;
+
 export const confirmAvailabilitySchema = z.object({
   stillAvailable: z.boolean(),
 });
 
 export type ConfirmAvailabilityDto = z.infer<typeof confirmAvailabilitySchema>;
+
+/**
+ * Taking a listing off the market for now.
+ *
+ * The reason is optional and is only ever shown back to the seller. Requiring
+ * one would add friction to the behaviour we most want to encourage — pausing
+ * the moment a property stops being available, rather than leaving it up.
+ */
+export const pauseListingSchema = z.object({
+  reason: z.string().trim().max(300).optional(),
+});
+
+export type PauseListingDto = z.infer<typeof pauseListingSchema>;
+
+/**
+ * Reporting a sale.
+ *
+ * Both details are optional. A seller who has just sold owes us nothing, and a
+ * form that interrogates them is one they will skip — leaving the listing up,
+ * which is the outcome this whole feature exists to prevent. The sale price is
+ * worth asking for because every other price on the platform is an asking
+ * price; `soldThroughPlatform` is worth asking because it is the only honest
+ * measure of whether we did our job.
+ */
+export const markSoldSchema = z.object({
+  soldPrice: priceSchema.optional(),
+  soldThroughPlatform: z.boolean().optional(),
+});
+
+export type MarkSoldDto = z.infer<typeof markSoldSchema>;

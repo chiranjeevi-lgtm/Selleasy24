@@ -30,11 +30,17 @@ import { DocumentsService } from './documents.service';
 import {
   createListingSchema,
   documentUploadRefined,
+  markSoldSchema,
+  pauseListingSchema,
   reorderPhotosSchema,
+  statsQuerySchema,
   updateListingSchema,
   type CreateListingDto,
   type DocumentUploadDto,
+  type MarkSoldDto,
+  type PauseListingDto,
   type ReorderPhotosDto,
+  type StatsQueryDto,
   type UpdateListingDto,
 } from './listings.dto';
 import { ListingsService } from './listings.service';
@@ -72,6 +78,23 @@ export class ListingsController {
   })
   async listMine(@CurrentUser() user: AuthenticatedUser) {
     return this.listings.listMine(user.id);
+  }
+
+  /**
+   * Declared before `mine/:id`, which would otherwise match "stats" and try to
+   * load a listing with that id.
+   */
+  @Get('mine/stats')
+  @ApiOperation({
+    summary: 'Performance of the seller’s own listings',
+    description:
+      'Views, shortlists and enquiries, in total and per listing, plus a daily series. Counts only — a seller is never told which buyers shortlisted their property.',
+  })
+  async myStats(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query(new ZodValidationPipe(statsQuerySchema)) query: StatsQueryDto,
+  ) {
+    return this.listings.stats(user.id, query.days);
   }
 
   @Get('mine/:id')
@@ -203,6 +226,49 @@ export class ListingsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.listings.confirmAvailability(user.id, id);
+  }
+
+  @Post(':id/pause')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Take a live listing off the market for now',
+    description:
+      'Hides it from buyers without ending it. Putting it back needs no second review — nothing about the property changed while it was away.',
+  })
+  async pause(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(pauseListingSchema)) dto: PauseListingDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+  ) {
+    return this.listings.pause(user.id, id, dto.reason, this.context(req));
+  }
+
+  @Post(':id/resume')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Put a paused listing back in front of buyers' })
+  async resume(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+  ) {
+    return this.listings.resume(user.id, id, this.context(req));
+  }
+
+  @Post(':id/mark-sold')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Record that the property sold',
+    description:
+      'Terminal. Cancels any open visit request with a reason, so nobody turns up at a property that has gone. The sale price and whether the buyer came from here are both optional.',
+  })
+  async markSold(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(markSoldSchema)) dto: MarkSoldDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+  ) {
+    return this.listings.markSold(user.id, id, dto, this.context(req));
   }
 
   private context(req: Request): RequestContext {

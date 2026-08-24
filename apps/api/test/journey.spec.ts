@@ -186,9 +186,23 @@ describe('buyer, seller and officer journey', () => {
     expect(saved.body.items).toHaveLength(1);
     expect(saved.body.items[0].isAvailable).toBe(true);
 
-    // --- 8. Buyer enquires, with no account required ----------------------
+    // --- 8. Buyer enquires -------------------------------------------------
+    //
+    // Signed in. Enquiries used to be open to anyone; they now require an
+    // account so sellers receive contacts that have been through registration
+    // rather than unverified strangers.
     await http()
       .post(`/api/listings/${listingId}/enquiries`)
+      .send({
+        name: 'Interested Buyer',
+        phone: '+919876500011',
+        message: 'Is it still available? Could I visit this weekend?',
+      })
+      .expect(401);
+
+    await http()
+      .post(`/api/listings/${listingId}/enquiries`)
+      .set(...bearer(buyer))
       .send({
         name: 'Interested Buyer',
         phone: '+919876500011',

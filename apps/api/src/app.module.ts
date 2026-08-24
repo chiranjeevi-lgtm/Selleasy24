@@ -11,11 +11,14 @@ import { CommonModule } from './common/common.module';
 import { JwtAuthGuard } from './common/auth/jwt-auth.guard';
 import { RolesGuard } from './common/auth/roles.guard';
 import { PrismaModule } from './common/prisma/prisma.module';
+import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { BuyersModule } from './modules/buyers/buyers.module';
 import { HealthModule } from './modules/health/health.module';
 import { LeadsModule } from './modules/leads/leads.module';
 import { OtpModule } from './common/otp/otp.module';
 import { ListingsModule } from './modules/listings/listings.module';
+import { ProjectsModule } from './modules/projects/projects.module';
 import { SavedModule } from './modules/saved/saved.module';
 import { SearchModule } from './modules/search/search.module';
 import { VerificationModule } from './modules/verification/verification.module';
@@ -104,10 +107,15 @@ import { VerificationModule } from './modules/verification/verification.module';
     // route's :id is UUID-constrained as well, so this ordering is defence in
     // depth rather than the only thing preventing a collision.
     ListingsModule,
+    // Same ordering reason as ListingsModule: the builder's literal routes
+    // (/projects/mine) register ahead of the public detail route in Search.
+    ProjectsModule,
     SearchModule,
     LeadsModule,
     SavedModule,
+    BuyersModule,
     VerificationModule,
+    AdminModule,
     HealthModule,
   ],
   providers: [

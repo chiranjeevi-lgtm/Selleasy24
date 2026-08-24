@@ -99,6 +99,18 @@ async function seedDevUsers(): Promise<void> {
       sellerKind: SellerKind.BROKER,
       reraNumber: 'TS-RERA-DEV-0001',
     },
+    /*
+     * A builder's trading name goes in `fullName` — for a developer account the
+     * "person" a buyer sees is the company, and that is the name on the RERA
+     * register. `reraNumber` here is the promoter registration, distinct from
+     * the per-project registration held on each Project row.
+     */
+    {
+      email: 'builder@kamalainfra.dev',
+      fullName: 'Aparna Constructions',
+      role: Role.BUILDER,
+      reraNumber: 'TS-RERA-PROM-0007',
+    },
     { email: 'buyer@kamalainfra.dev', fullName: 'Test Buyer', role: Role.BUYER },
   ];
 
