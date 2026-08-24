@@ -46,14 +46,17 @@ function Header() {
         </Link>
 
         {/*
-          The text links are hidden below `sm` deliberately: logo + both links +
-          the button measure 433px, against 390px available on a common phone.
-          Nothing in this row wraps or shrinks, so it would overflow and widen
-          the document. Both links stay reachable on mobile from the footer.
+          The text links are hidden below `md` deliberately. Nothing in this row
+          wraps or shrinks, so it overflows and widens the document once the
+          content no longer fits: logo + three links + the button measure roughly
+          570px, which cleared 600px at `sm` but not with a fourth link added.
+          Rather than dropping a destination, the reveal moved up a breakpoint.
+          Every link stays reachable below it from the footer.
         */}
         <nav className="flex items-center gap-1 text-[0.875rem]">
           {[
             { href: '/', label: 'Buy' },
+            { href: '/projects', label: 'New projects' },
             { href: '/saved', label: 'Saved' },
             { href: '/seller/listings', label: 'List your property' },
           ].map((item) => (
@@ -62,7 +65,7 @@ function Header() {
               href={item.href}
               /* Gold underline grows from the left on hover — the accent doing
                  quiet work rather than sitting only on the badge. */
-              className="group relative hidden rounded-control px-3 py-2 text-white/75 transition-colors hover:text-white sm:inline-flex"
+              className="group relative hidden rounded-control px-3 py-2 text-white/75 transition-colors hover:text-white md:inline-flex"
             >
               {item.label}
               <span
@@ -122,7 +125,9 @@ function Footer() {
             <ul className="mt-3 space-y-2.5">
               {[
                 { href: '/', label: 'Buy a home' },
+                { href: '/projects', label: 'New projects' },
                 { href: '/saved', label: 'Saved homes' },
+                { href: '/visits', label: 'Your visits' },
                 { href: '/seller/listings', label: 'List your property' },
                 { href: '/login', label: 'Sign in' },
               ].map((item) => (

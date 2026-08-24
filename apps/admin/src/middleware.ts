@@ -168,5 +168,12 @@ export const config = {
    * There is no public surface in this app — every route needs a live staff
    * session.
    */
-  matcher: ['/queue/:path*', '/review/:path*', '/reports/:path*', '/login'],
+  matcher: [
+    '/dashboard/:path*',
+    '/queue/:path*',
+    '/review/:path*',
+    '/projects/:path*',
+    '/reports/:path*',
+    '/login',
+  ],
 };

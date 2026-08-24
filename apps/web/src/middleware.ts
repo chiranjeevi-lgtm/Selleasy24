@@ -103,9 +103,10 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  const isSellerArea = pathname.startsWith('/seller');
+  // Projects moved under /seller, so one prefix now covers every selling page.
+  const isGatedArea = pathname.startsWith('/seller');
 
-  if (isSellerArea && !effectiveAccessToken) {
+  if (isGatedArea && !effectiveAccessToken) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('next', `${pathname}${search}`);
     const redirect = NextResponse.redirect(loginUrl);
@@ -122,9 +123,23 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   /**
-   * Runs on the seller area and the auth pages. Deliberately excludes public
-   * browsing: a buyer searching listings has no session to refresh, and adding a
-   * middleware hop to the most-visited pages would cost latency for nothing.
+   * The seller and builder areas, the buyer's own pages, and the auth pages.
+   *
+   * Deliberately excludes public browsing: a buyer searching listings has no
+   * session to refresh, and adding a middleware hop to the most-visited pages
+   * would cost latency for nothing.
+   *
+   * `/saved` and `/visits` are here because they are signed-in-only and refuse
+   * to render without a session. Without the refresh hop, arriving on one more
+   * than fifteen minutes after the last page load bounces the user to sign-in
+   * even though their refresh token is still good.
    */
-  matcher: ['/seller/:path*', '/login', '/register'],
+  matcher: [
+    '/seller/:path*',
+    '/welcome/:path*',
+    '/saved',
+    '/visits',
+    '/login',
+    '/register',
+  ],
 };

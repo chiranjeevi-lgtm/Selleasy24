@@ -17,12 +17,31 @@ import { TextInput } from '@/components/form-fields';
  * though an SMS had arrived would leave anyone watching a demonstration with the
  * wrong idea about what is actually built.
  */
-export function PhoneForm({ initialPhone }: { initialPhone: string | null }) {
+export function PhoneForm({
+  initialPhone,
+  /**
+   * Where to go once the number is confirmed, and what the copy should say.
+   *
+   * Parameterised rather than copied into a second component: the verification
+   * logic is identical for a seller and a buyer, and two copies would drift the
+   * moment one of them was fixed. Only the wording and the destination differ.
+   */
+  variant = 'seller',
+  nextHref = '/seller/listings',
+  nextLabel = 'Back to my listings',
+}: {
+  initialPhone: string | null;
+  variant?: 'seller' | 'buyer';
+  nextHref?: string;
+  nextLabel?: string;
+}) {
   const [state, action] = useActionState<PhoneState, FormData>(
     async (prev, form) =>
       (form.get('intent') === 'verify' ? verifyCode : requestCode)(prev, form),
     { step: 'phone', ...(initialPhone && { phone: initialPhone }) },
   );
+
+  const isBuyer = variant === 'buyer';
 
   if (state.step === 'done') {
     return (
@@ -37,15 +56,16 @@ export function PhoneForm({ initialPhone }: { initialPhone: string | null }) {
           <div>
             <h2 className="text-[1.0625rem] font-semibold text-ink">Number verified</h2>
             <p className="mt-1.5 text-[0.9375rem] leading-relaxed text-muted">
-              <span className="tabular">{state.phone}</span> is confirmed. Buyers who
-              enquire will reach you here, and you can now submit listings for
-              review.
+              <span className="tabular">{state.phone}</span> is confirmed.{' '}
+              {isBuyer
+                ? 'When you ask to see a property, the owner reaches you here. It goes to that one seller and nobody else.'
+                : 'Buyers who enquire will reach you here, and you can now submit listings for review.'}
             </p>
             <Link
-              href="/seller/listings"
+              href={nextHref}
               className="mt-4 inline-block rounded-control bg-action px-5 py-2.5 text-[0.9375rem] font-semibold text-white transition-colors hover:bg-action-hover"
             >
-              Back to my listings
+              {nextLabel}
             </Link>
           </div>
         </div>
@@ -75,7 +95,11 @@ export function PhoneForm({ initialPhone }: { initialPhone: string | null }) {
             inputMode="tel"
             defaultValue={state.phone ?? '+91'}
             placeholder="+919876543210"
-            hint="Include the country code. Buyers who enquire will be given this number."
+            hint={
+              isBuyer
+                ? 'Include the country code. Sellers you contact reach you on this number — nobody else gets it.'
+                : 'Include the country code. Buyers who enquire will be given this number.'
+            }
           />
           <div className="mt-5">
             <Submit idle="Send code" busy="Sending…" />

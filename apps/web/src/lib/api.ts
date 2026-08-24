@@ -126,6 +126,88 @@ export interface SearchResult {
   items: ListingCard[];
 }
 
+// ---------------------------------------------------------------------------
+// Builder projects
+// ---------------------------------------------------------------------------
+
+export type ProjectStage =
+  | 'PRE_LAUNCH'
+  | 'UNDER_CONSTRUCTION'
+  | 'NEARING_POSSESSION'
+  | 'READY_TO_MOVE'
+  | 'DELIVERED';
+
+export interface ProjectCard {
+  id: string;
+  name: string;
+  stage: ProjectStage;
+  address: string;
+  pincode: string;
+  locality: string;
+  city: string;
+  possessionDate: string | null;
+  deliveredOn: string | null;
+  reraNumber: string;
+  isVerified: boolean;
+  firstListedAt: string | null;
+  verifiedAt: string | null;
+  totalTowers: number | null;
+  totalUnits: number | null;
+  /** Derived from the units, so nothing has to be kept in sync. */
+  priceFrom: number | null;
+  priceTo: number | null;
+  bedrooms: number[];
+  builder: { id: string; name: string; reraNumber: string | null };
+  photos: Array<{ id: string; url: string; isRender: boolean }>;
+}
+
+export interface ProjectUnit {
+  id: string;
+  bedrooms: number;
+  bathrooms: number;
+  balconies: number | null;
+  areaSqft: number;
+  carpetAreaSqft: number | null;
+  /** A starting figure, not an asking price. Never render it without "from". */
+  priceFrom: number;
+  totalUnits: number | null;
+  availableUnits: number | null;
+  floorPlanUrl: string | null;
+}
+
+export interface ProjectDetail extends ProjectCard {
+  description: string;
+  landAreaAcres: number | null;
+  approvingAuthority: string | null;
+  amenities: string[];
+  units: ProjectUnit[];
+}
+
+export interface ProjectSearchResult {
+  total: number;
+  limit: number;
+  offset: number;
+  items: ProjectCard[];
+}
+
+export interface ProjectVerificationRecord {
+  projectId: string;
+  reraNumber: string;
+  verifiedAt: string;
+  firstListedAt: string | null;
+  checks: VerificationCheck[];
+}
+
+export interface ProjectSearchParams {
+  stage?: string;
+  locality?: string;
+  bedrooms?: string;
+  minPrice?: string;
+  maxPrice?: string;
+  limit?: string;
+  offset?: string;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -232,6 +314,34 @@ export const api = {
 
   localities(city = 'Hyderabad'): Promise<Locality[]> {
     return request<Locality[]>(`/localities?city=${encodeURIComponent(city)}`);
+  },
+
+  // --- New construction ---
+
+  searchProjects(params: ProjectSearchParams): Promise<ProjectSearchResult> {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== '') {
+        query.set(key, value);
+      }
+    }
+    return request<ProjectSearchResult>(`/projects/search?${query.toString()}`);
+  },
+
+  project(id: string): Promise<ProjectDetail> {
+    return request<ProjectDetail>(`/projects/${id}`);
+  },
+
+  /** Null when a project has no published record, so the page renders without it. */
+  async projectVerification(id: string): Promise<ProjectVerificationRecord | null> {
+    try {
+      return await request<ProjectVerificationRecord>(`/verification/projects/public/${id}`);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        return null;
+      }
+      throw error;
+    }
   },
 
   submitEnquiry(

@@ -147,3 +147,89 @@ export function formatBenchmark(
   const direction = differencePercent > 0 ? 'above' : 'below';
   return `${magnitude}% ${direction} the ${locality} median of ${formatRupees(medianPricePerSqft)}`;
 }
+
+// ---------------------------------------------------------------------------
+// Builder projects
+// ---------------------------------------------------------------------------
+
+/**
+ * Stage, in the words a buyer uses.
+ *
+ * "Under construction" and "ready to move" are the terms on every hoarding in
+ * Hyderabad; the enum's SCREAMING_CASE is not. The distinction between these
+ * matters more than anything else on a project card — an unbuilt flat and a
+ * finished one are different purchases carrying different risk.
+ */
+export const PROJECT_STAGE_LABEL: Record<string, string> = {
+  PRE_LAUNCH: 'Pre-launch',
+  UNDER_CONSTRUCTION: 'Under construction',
+  NEARING_POSSESSION: 'Nearing possession',
+  READY_TO_MOVE: 'Ready to move',
+  DELIVERED: 'Delivered',
+};
+
+/**
+ * "from ₹89 L" or "₹89 L – ₹1.98 Cr".
+ *
+ * Always carries "from" on a single figure. A project quotes a starting price
+ * because units differ by floor, facing and view, and dropping the word turns a
+ * starting figure into a promise the builder did not make.
+ */
+export function formatPriceRange(from: number | null, to: number | null): string | null {
+  if (from === null) {
+    return null;
+  }
+  if (to === null || to === from) {
+    return `from ${formatRupeesShort(from)}`;
+  }
+  return `${formatRupeesShort(from)} – ${formatRupeesShort(to)}`;
+}
+
+/** "2, 3 & 4 BHK" — how configurations are written on a brochure. */
+export function formatConfigurations(bedrooms: number[]): string | null {
+  if (bedrooms.length === 0) {
+    return null;
+  }
+  if (bedrooms.length === 1) {
+    return `${bedrooms[0]} BHK`;
+  }
+  const head = bedrooms.slice(0, -1).join(', ');
+  return `${head} & ${bedrooms[bedrooms.length - 1]} BHK`;
+}
+
+/**
+ * "Possession by Oct 2027", or the handover date once it has happened.
+ *
+ * Month precision, not a day: nobody hands over a tower on a promised date, and
+ * a specific day would read as a commitment the builder has not made.
+ */
+export function formatPossession(
+  possessionDate: string | null,
+  deliveredOn: string | null,
+): string | null {
+  if (deliveredOn) {
+    const when = monthYear(deliveredOn);
+    return when ? `Handed over ${when}` : null;
+  }
+  if (!possessionDate) {
+    return null;
+  }
+  const when = monthYear(possessionDate);
+  return when ? `Possession by ${when}` : null;
+}
+
+function monthYear(value: string): string | null {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return new Intl.DateTimeFormat('en-IN', { month: 'short', year: 'numeric' }).format(date);
+}
+
+/** "4.5 acres", the unit Indian project listings quote land in. */
+export function formatAcres(acres: number | null): string | null {
+  if (acres === null) {
+    return null;
+  }
+  return `${acres.toFixed(2).replace(/\.?0+$/, '')} acres`;
+}

@@ -73,14 +73,20 @@ export default function RegisterPage() {
 
         <TextInput
           name="phone"
-          label={isSeller ? 'Phone' : 'Phone (optional)'}
+          label="Phone"
           type="tel"
           autoComplete="tel"
           placeholder="+919876543210"
+          /*
+           * Asked here and confirmed on the next screen, whoever is signing up.
+           * A seller needs a verified number before submitting a listing, and a
+           * buyer needs one before enquiring or asking to visit — so both are
+           * better off doing it now than being stopped later.
+           */
           hint={
             isSeller
-              ? 'Required before you can submit a listing — buyers reach you on this number.'
-              : undefined
+              ? 'Buyers reach you on this number. We confirm it on the next screen.'
+              : 'Only the seller you contact ever sees it. We confirm it on the next screen.'
           }
           error={state.fieldErrors?.phone}
         />

@@ -1,15 +1,31 @@
 import Link from 'next/link';
+import { ApiError } from '@/lib/api';
 import { serverApi } from '@/lib/server-api';
+import { WrongAccount } from '../wrong-account';
 import { StatusBadge, StatusMeaning } from '@/components/status-badge';
 import { formatAge, formatArea, formatRupees } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
 export default async function SellerListingsPage() {
+  // A builder reaching this by typed URL gets an explanation rather than a 500.
   const [listings, me] = await Promise.all([
-    serverApi.myListings(),
+    serverApi.myListings().catch((error) => {
+      if (error instanceof ApiError && error.status === 403) return null;
+      throw error;
+    }),
     serverApi.me().catch(() => null),
   ]);
+
+  if (listings === null) {
+    return (
+      <WrongAccount
+        what="Resale listings"
+        goTo="/seller/projects"
+        goToLabel="Go to your projects"
+      />
+    );
+  }
 
   const needsPhoneVerification = me !== null && !me.isPhoneVerified;
 
@@ -42,7 +58,7 @@ export default async function SellerListingsPage() {
       )}
 
       <div className="flex flex-wrap items-baseline justify-between gap-4">
-        <h2 className="stamp-label text-muted">
+        <h2 className="label text-muted">
           {listings.length === 0
             ? 'No listings yet'
             : `${listings.length} ${listings.length === 1 ? 'listing' : 'listings'}`}

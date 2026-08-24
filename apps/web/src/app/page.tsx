@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { api, type Locality, type SearchResult } from '@/lib/api';
 import { ListingCardItem } from '@/components/listing-card';
+import { Recommended, RecommendationsPrompt } from '@/components/recommended';
 import { AppliedFilters, FilterPanel } from '@/components/search-filters';
 import { PropertyPicker } from '@/components/property-picker';
 import { serverApi } from '@/lib/server-api';
@@ -273,6 +274,23 @@ export default async function HomePage({ searchParams }: PageProps) {
     .catch(() => new Set<string>());
 
   /*
+   * Recommendations, for a signed-in buyer who has told us something.
+   *
+   * Suppressed entirely once a filter is applied: someone who has just said
+   * "3 BHK in Kondapur under a crore" does not need a row above their results
+   * guessing at the same thing.
+   *
+   * All three calls fail soft. A signed-out visitor is the common case, not an
+   * error, and a recommendation strip is never worth failing the home page for.
+   */
+  const [recommendations, buyerProfile] = isFiltered
+    ? [null, null]
+    : await Promise.all([
+        serverApi.recommendations(6).catch(() => null),
+        serverApi.buyerProfile().catch(() => null),
+      ]);
+
+  /*
    * Locality tiles, built from the results already fetched rather than from
    * extra queries. Each tile borrows the cover photo of a home in that area, so
    * the row shows real inventory instead of stock imagery.
@@ -387,6 +405,26 @@ export default async function HomePage({ searchParams }: PageProps) {
           <AppliedFilters values={values} {...(localityName && { localityName })} />
         </div>
       </section>
+
+      {/*
+        Recommendations sit directly under the search, above everything else a
+        signed-in buyer might browse — they are the most relevant thing on the
+        page for someone who has told us what they want.
+
+        The prompt only appears for a buyer who is signed in and has said
+        nothing yet. A signed-out visitor gets neither: asking someone to state
+        a budget before they have seen a single property is the wrong order.
+      */}
+      {recommendations?.personalised && recommendations.items.length > 0 && (
+        <Recommended
+          items={recommendations.items}
+          completedOnboarding={buyerProfile?.completedAt !== null}
+        />
+      )}
+
+      {recommendations !== null &&
+        !recommendations.personalised &&
+        buyerProfile !== null && <RecommendationsPrompt />}
 
       {/*
         Locality tiles.

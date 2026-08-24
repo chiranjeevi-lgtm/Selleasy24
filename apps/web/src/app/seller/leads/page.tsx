@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { serverApi } from '@/lib/server-api';
-import { formatAge, formatDate } from '@/lib/format';
+import { formatAge, formatArea, formatDate } from '@/lib/format';
 import { LeadStatusControl } from './lead-status-control';
 
 export const dynamic = 'force-dynamic';
@@ -21,13 +21,13 @@ export default async function SellerLeadsPage() {
   return (
     <div>
       <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h2 className="stamp-label text-muted">
+        <h2 className="label text-muted">
           {leads.length === 0
             ? 'No enquiries yet'
             : `${leads.length} ${leads.length === 1 ? 'enquiry' : 'enquiries'}`}
         </h2>
         {newCount > 0 && (
-          <span className="stamp-label border border-action/35 px-2 py-[3px] text-action">
+          <span className="label border border-action/35 px-2 py-[3px] text-action">
             {newCount} unanswered
           </span>
         )}
@@ -84,19 +84,52 @@ export default async function SellerLeadsPage() {
                     </p>
                   </div>
 
-                  <span className="stamp-label text-faint">
+                  <span className="label text-faint">
                     {formatAge(lead.createdAt)}
                   </span>
                 </div>
 
+                {/*
+                  A lead carries exactly one target — a resale listing or a
+                  project — so this renders whichever it is. For a project the
+                  configuration is named too: "someone enquired" is far less
+                  use to a builder than "someone enquired about the 3 BHK",
+                  and it is the first thing their sales team would ask.
+                */}
                 <p className="mt-2 text-[0.75rem] text-muted">
                   About{' '}
-                  <Link
-                    href={`/seller/listings/${lead.listing.id}`}
-                    className="text-action hover:underline"
-                  >
-                    {lead.listing.title}
-                  </Link>
+                  {lead.listing ? (
+                    <Link
+                      href={`/seller/listings/${lead.listing.id}`}
+                      className="text-action hover:underline"
+                    >
+                      {lead.listing.title}
+                    </Link>
+                  ) : lead.project ? (
+                    <>
+                      <Link
+                        href={`/seller/projects/${lead.project.id}`}
+                        className="text-action hover:underline"
+                      >
+                        {lead.project.name}
+                      </Link>
+                      {lead.projectUnit && (
+                        <span className="text-ink">
+                          {' '}
+                          · {lead.projectUnit.bedrooms} BHK
+                          <span className="text-muted">
+                            {' '}
+                            ({formatArea(lead.projectUnit.areaSqft)})
+                          </span>
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    // Unreachable while the CHECK constraint holds, but a lead
+                    // pointing at nothing should read as a fault rather than
+                    // silently render an empty sentence.
+                    <span className="text-faint">a property that has since been removed</span>
+                  )}
                 </p>
 
                 {lead.message && (

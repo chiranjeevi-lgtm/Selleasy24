@@ -268,7 +268,7 @@ export function SubmitForReview({
   if (blockers.length > 0) {
     return (
       <div className="border border-line bg-surface px-4 py-4">
-        <h3 className="stamp-label text-muted">Before you can submit</h3>
+        <h3 className="label text-muted">Before you can submit</h3>
         <ul className="mt-2.5 space-y-1.5">
           {blockers.map((blocker) => (
             <li key={blocker} className="flex gap-2 text-[0.8125rem] text-muted">
@@ -286,7 +286,7 @@ export function SubmitForReview({
   return (
     <form action={action} className="border border-line bg-surface px-4 py-4">
       <input type="hidden" name="listingId" value={listingId} />
-      <h3 className="stamp-label text-muted">Ready for verification</h3>
+      <h3 className="label text-muted">Ready for verification</h3>
       <p className="mt-2 text-[0.8125rem] leading-relaxed text-muted">
         An officer will compare your documents against these details, usually
         within 24 hours. You cannot edit the listing while it is in review.

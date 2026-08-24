@@ -159,8 +159,196 @@ export interface StaffUser {
   role: string;
 }
 
+export interface ProjectQueueItem {
+  id: string;
+  name: string;
+  stage: string;
+  reraNumber: string;
+  address: string;
+  possessionDate: string | null;
+  submittedAt: string | null;
+  createdAt: string;
+  waitingHours: number;
+  slaBreached: boolean;
+  builder: { id: string; fullName: string; reraNumber: string | null };
+  neighborhood: { name: string; city: string };
+  _count: { photos: number; documents: number; units: number };
+}
+
+export interface ProjectQueue {
+  total: number;
+  overdue: number;
+  slaHours: number;
+  items: ProjectQueueItem[];
+}
+
+export interface ReviewProject {
+  id: string;
+  name: string;
+  description: string;
+  stage: string;
+  status: string;
+  address: string;
+  pincode: string;
+  possessionDate: string | null;
+  deliveredOn: string | null;
+  reraNumber: string;
+  approvingAuthority: string | null;
+  totalTowers: number | null;
+  totalUnits: number | null;
+  landAreaAcres: string | null;
+  amenities: string[];
+  submittedAt: string | null;
+  firstListedAt: string | null;
+  neighborhood: { name: string; city: string; pincode: string };
+  builder: {
+    id: string;
+    fullName: string;
+    email: string;
+    phone: string | null;
+    reraNumber: string | null;
+    isEmailVerified: boolean;
+    isPhoneVerified: boolean;
+    createdAt: string;
+    _count: { builderProjects: number };
+  };
+  units: Array<{
+    id: string;
+    bedrooms: number;
+    bathrooms: number;
+    areaSqft: number;
+    carpetAreaSqft: number | null;
+    priceFrom: string;
+    totalUnits: number | null;
+    availableUnits: number | null;
+  }>;
+  photos: Array<{ id: string; url: string; sortOrder: number; isRender: boolean }>;
+  documents: ReviewDocument[];
+  verifications: Array<{
+    id: string;
+    decision: string;
+    reason: string | null;
+    internalNotes: string | null;
+    createdAt: string;
+    verifier: { id: string; fullName: string };
+    checks: Array<{ kind: string; passed: boolean; note: string | null }>;
+  }>;
+  /**
+   * Which checks this project's stage makes mandatory. Supplied by the API so
+   * the rule lives in one place — a checklist that disagrees with the endpoint
+   * enforcing it is worse than no checklist.
+   */
+  requiredChecks: string[];
+}
+
+/**
+ * Dashboard figures.
+ *
+ * Every median and rate is nullable, and nullable means "not enough to say"
+ * rather than zero. The UI must render those as an em dash, never as 0 — a
+ * dashboard reporting "0 hours to decision" because nothing has been decided
+ * is worse than one reporting nothing.
+ */
+export interface Metrics {
+  generatedAt: string;
+  windowDays: number;
+  slaHours: number;
+  /** Below this, a median is shown but flagged as drawn from too little. */
+  minConfidentSample: number;
+
+  verification: {
+    pendingListings: number;
+    pendingProjects: number;
+    overdue: number;
+    decided: {
+      total: number;
+      approved: number;
+      rejected: number;
+      revisionRequested: number;
+    };
+    medianHoursToDecision: number | null;
+    p90HoursToDecision: number | null;
+    withinSlaPercent: number | null;
+    timedSample: number;
+  };
+
+  funnel: {
+    views: number;
+    shortlists: number;
+    enquiries: number;
+    siteVisits: number;
+    sold: number;
+    shortlistRate: number | null;
+    enquiryRate: number | null;
+    visitRate: number | null;
+  };
+
+  leads: {
+    total: number;
+    new: number;
+    contacted: number;
+    interested: number;
+    notInterested: number;
+    converted: number;
+    /** Seller-reported, and systematically under-counted. Label it as such. */
+    conversionPercent: number | null;
+    medianResponseHours: number | null;
+    respondedSample: number;
+    unansweredOver48h: number;
+    unansweredHours: number;
+  };
+
+  sales: {
+    sold: number;
+    throughPlatform: number;
+    notThroughPlatform: number;
+    notAnswered: number;
+    /** Of those who answered, not of all sales. */
+    attributedPercent: number | null;
+    medianPriceGapPercent: number | null;
+    priceDisclosed: number;
+  };
+
+  growth: {
+    registrations: {
+      total: number;
+      buyers: number;
+      owners: number;
+      brokers: number;
+      builders: number;
+    };
+    daily: Array<{
+      date: string;
+      registrations: number;
+      listingsSubmitted: number;
+      enquiries: number;
+    }>;
+  };
+
+  inventory: {
+    liveListings: number;
+    draftListings: number;
+    pausedListings: number;
+    soldListings: number;
+    rejectedListings: number;
+    liveProjects: number;
+    draftProjects: number;
+    suspendedUsers: number;
+  };
+
+  onboarding: {
+    buyers: number;
+    started: number;
+    completed: number;
+    completionPercent: number | null;
+  };
+
+  moderation: { openReports: number };
+}
+
 export const adminApi = {
   me: () => authed<StaffUser>('/auth/me'),
+  metrics: (days = 30) => authed<Metrics>(`/admin/metrics?days=${days}`),
   queue: (limit = 50) => authed<Queue>(`/verification/queue?limit=${limit}`),
   review: (id: string) => authed<ReviewListing>(`/verification/listings/${id}`),
   decide: (id: string, payload: unknown) =>
@@ -168,6 +356,16 @@ export const adminApi = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
+  projectQueue: (limit = 50) =>
+    authed<ProjectQueue>(`/verification/projects/queue?limit=${limit}`),
+  reviewProject: (id: string) => authed<ReviewProject>(`/verification/projects/${id}`),
+  decideProject: (id: string, payload: unknown) =>
+    authed(`/verification/projects/${id}/decide`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
   reports: () => authed<ReportItem[]>('/reports'),
   resolveReport: (id: string, payload: unknown) =>
     authed(`/reports/${id}/resolve`, { method: 'PATCH', body: JSON.stringify(payload) }),
@@ -183,4 +381,13 @@ export const adminApi = {
  */
 export function documentUrl(documentId: string): string {
   return `/documents/${documentId}`;
+}
+
+/**
+ * Project documents live in their own table and stream from a different API
+ * route, so they need their own proxy path — the two ids are not interchangeable
+ * and a shared route would have to guess which table to look in.
+ */
+export function projectDocumentUrl(documentId: string): string {
+  return `/project-documents/${documentId}`;
 }

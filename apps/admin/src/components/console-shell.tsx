@@ -7,16 +7,28 @@ import { signOut } from '@/app/actions';
  * The seal-red rule across the top is the same device the public endorsement uses
  * — here it marks the whole surface as the place verification decisions are made.
  */
+type Tab = 'dashboard' | 'queue' | 'projects' | 'reports';
+
+const TABS: ReadonlyArray<{ id: Tab; href: string; label: string }> = [
+  { id: 'dashboard', href: '/dashboard', label: 'Dashboard' },
+  { id: 'queue', href: '/queue', label: 'Review queue' },
+  // A separate queue from listings rather than one merged view: the two reviews
+  // check different documents against different registers, and interleaving them
+  // would mean switching context on every row.
+  { id: 'projects', href: '/projects', label: 'Projects' },
+  { id: 'reports', href: '/reports', label: 'Reports' },
+];
+
 export function ConsoleShell({
   user,
   active,
   children,
 }: {
   user: { fullName: string; role: string };
-  active: 'queue' | 'reports';
+  active: Tab;
   children: React.ReactNode;
 }) {
-  const tabClass = (tab: 'queue' | 'reports') =>
+  const tabClass = (tab: Tab) =>
     `px-3 py-1.5 text-[0.8125rem] transition-colors ${
       active === tab
         ? 'border-b-2 border-seal text-ink'
@@ -37,12 +49,11 @@ export function ConsoleShell({
 
           <div className="flex items-center gap-1">
             <nav className="flex items-center">
-              <Link href="/queue" className={tabClass('queue')}>
-                Review queue
-              </Link>
-              <Link href="/reports" className={tabClass('reports')}>
-                Reports
-              </Link>
+              {TABS.map((tab) => (
+                <Link key={tab.id} href={tab.href} className={tabClass(tab.id)}>
+                  {tab.label}
+                </Link>
+              ))}
             </nav>
             <form action={signOut}>
               <button

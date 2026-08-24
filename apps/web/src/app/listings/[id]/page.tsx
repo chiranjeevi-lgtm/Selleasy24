@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
 import { Endorsement } from '@/components/endorsement';
-import { EnquiryForm } from '@/components/enquiry-form';
+import { ContactPanel } from '@/components/contact-panel';
 import { PropertyFacts } from '@/components/property-facts';
 import { SaveButton } from '@/components/save-button';
 import { CompareToggle } from '@/components/compare-controls';
@@ -57,10 +57,15 @@ export default async function ListingPage({ params }: PageProps) {
 
   // Signed-out visitors get `false` — no session is a normal state on a public
   // page, so the failure is expected rather than exceptional.
-  const isSaved = await serverApi
-    .savedIds()
-    .then((result) => result.ids.includes(id))
-    .catch(() => false);
+  const [isSaved, me] = await Promise.all([
+    serverApi
+      .savedIds()
+      .then((result) => result.ids.includes(id))
+      .catch(() => false),
+    // Null for a signed-out visitor, which is a normal state on a public page:
+    // browsing, comparing and shortlisting all work without an account.
+    serverApi.me().catch(() => null),
+  ]);
 
   const perSqft = formatPerSqft(listing.pricePerSqft);
   const benchmark = formatBenchmark(
@@ -247,7 +252,13 @@ export default async function ListingPage({ params }: PageProps) {
           )}
 
           <div className="mt-4">
-            <EnquiryForm listingId={listing.id} sellerName={listing.listedBy.name} />
+            <ContactPanel
+              listingId={listing.id}
+              sellerName={listing.listedBy.name}
+              isSignedIn={me !== null}
+              {...(me?.fullName && { buyerName: me.fullName })}
+              {...(me?.phone !== undefined && { buyerPhone: me.phone })}
+            />
           </div>
         </aside>
       </div>

@@ -17,6 +17,10 @@ export default async function LoginPage({
   const rawNext = params.next;
   const next = Array.isArray(rawNext) ? rawNext[0] : rawNext;
 
+  // Set by the reset flow, which lands here rather than signing the user in —
+  // a fresh password should be typed once to prove it took.
+  const justReset = params.reset === 'done';
+
   return (
     <div className="mx-auto max-w-sm px-5 py-16">
       <h1 className="font-display text-[1.75rem] font-extrabold leading-tight tracking-tight text-ink">
@@ -27,11 +31,26 @@ export default async function LoginPage({
         owners without an account.
       </p>
 
+      {justReset && (
+        <p
+          role="status"
+          className="mt-5 rounded-control border-l-2 border-action bg-canvas-deep px-3.5 py-3 text-[0.875rem] leading-relaxed text-ink"
+        >
+          Your password is set. Sign in with it — any other device was signed
+          out.
+        </p>
+      )}
+
       <div className="mt-7">
         <LoginForm next={next ?? ''} />
       </div>
 
       <div className="mt-7 space-y-2 border-t border-line pt-5 text-[0.8125rem]">
+        <p className="text-muted">
+          <Link href="/forgot-password" className="text-action hover:underline">
+            Forgot your password?
+          </Link>
+        </p>
         <p className="text-muted">
           New here?{' '}
           <Link href="/register" className="text-action hover:underline">

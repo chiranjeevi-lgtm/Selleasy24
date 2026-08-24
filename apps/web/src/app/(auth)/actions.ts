@@ -27,6 +27,11 @@ function safeRedirectTarget(next: string | undefined, role: string): string {
   if (next && next.startsWith('/') && !next.startsWith('//')) {
     return next;
   }
+  // A builder's inventory is their projects, so that is their landing page —
+  // sending them to the buyer search would be as odd as sending an owner there.
+  if (role === 'BUILDER') {
+    return '/seller/projects';
+  }
   return role === 'OWNER' || role === 'BROKER' ? '/seller/listings' : '/';
 }
 
@@ -117,21 +122,140 @@ export async function signUp(_prev: FormState, form: FormData): Promise<FormStat
   await setSessionCookies(result);
 
   /*
-   * Sellers go to phone verification, not to their (empty) dashboard.
+   * Everyone goes to phone verification first, then onward.
    *
-   * A verified number is required before a listing can be submitted, so
-   * deferring it just means the seller fills in a whole listing and is stopped
-   * at the last step. Asking immediately, while they are still in a sign-up
-   * frame of mind, is both kinder and far more likely to be completed.
+   * A verified number is required before a seller can submit a listing, and
+   * before a buyer can send an enquiry or ask for a site visit. Deferring it
+   * means the person fills in a whole form and is stopped at the last step.
+   * Asking immediately, while they are still in a sign-up frame of mind, is
+   * both kinder and far more likely to be completed — it is one field.
    *
-   * Buyers are not asked: they can browse, compare, shortlist and enquire
-   * without a phone number at all.
+   * Buyers continue into a short run of preference questions afterwards. Every
+   * one of those is skippable: someone who cannot reach a property listing
+   * quickly leaves, and a preference extracted by force is worth less than no
+   * preference at all.
    */
   const isSeller = result.user.role === 'OWNER' || result.user.role === 'BROKER';
-  redirect(isSeller ? '/seller/phone' : safeRedirectTarget(undefined, result.user.role));
+
+  if (isSeller) {
+    redirect('/seller/phone');
+  }
+
+  if (result.user.role === 'BUILDER') {
+    redirect('/seller/projects');
+  }
+
+  redirect('/welcome/phone');
 }
 
 export async function signOut(): Promise<void> {
   await clearSessionCookies();
   redirect('/');
+}
+
+// ---------------------------------------------------------------------------
+// Password reset and email verification
+// ---------------------------------------------------------------------------
+
+/**
+ * These three actions post to endpoints that return a plain acknowledgement
+ * rather than a session, so they cannot use `postAuth` — which insists on a
+ * token pair coming back.
+ */
+async function postPlain(
+  path: string,
+  payload: unknown,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/api/auth/${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      cache: 'no-store',
+    });
+  } catch {
+    return { ok: false, message: 'Could not reach the server. Check your connection.' };
+  }
+
+  if (response.ok) {
+    return { ok: true };
+  }
+
+  let message = 'Something went wrong. Try again.';
+  try {
+    const body = (await response.json()) as { message?: string };
+    if (body.message) {
+      message = body.message;
+    }
+  } catch {
+    // Keep the generic message.
+  }
+  return { ok: false, message };
+}
+
+export interface ResetState extends FormState {
+  sent?: boolean;
+}
+
+/**
+ * Asks for a reset link.
+ *
+ * Reports success whatever happens, matching the API — which deliberately
+ * answers identically for a registered and an unregistered address so the
+ * endpoint cannot be used to discover who has an account. A UI that said
+ * "no such user" would hand back exactly the information the API withholds.
+ *
+ * A genuine transport failure is still surfaced: "we could not reach the
+ * server" tells an attacker nothing and tells an honest user something they
+ * need to know.
+ */
+export async function requestPasswordReset(
+  _prev: ResetState,
+  form: FormData,
+): Promise<ResetState> {
+  const email = String(form.get('email') ?? '').trim();
+
+  if (!email) {
+    return { error: 'Enter the email address you signed up with.' };
+  }
+
+  const result = await postPlain('request-password-reset', { email });
+
+  if (!result.ok && result.message.startsWith('Could not reach')) {
+    return { error: result.message };
+  }
+
+  return { sent: true };
+}
+
+/**
+ * Sets the new password.
+ *
+ * Succeeding here invalidates every existing session for the account, which the
+ * page says plainly — someone resetting a password because they think it was
+ * stolen needs to know the other sessions are gone.
+ */
+export async function resetPassword(_prev: FormState, form: FormData): Promise<FormState> {
+  const token = String(form.get('token') ?? '');
+  const password = String(form.get('password') ?? '');
+  const confirm = String(form.get('confirmPassword') ?? '');
+
+  if (!token) {
+    return { error: 'This reset link is incomplete. Request a new one.' };
+  }
+
+  // Checked here rather than only server-side: the API has no second field to
+  // compare against, and a typo should not cost someone another email.
+  if (password !== confirm) {
+    return { fieldErrors: { confirmPassword: 'Both passwords must match.' } };
+  }
+
+  const result = await postPlain('reset-password', { token, password });
+
+  if (!result.ok) {
+    return { error: result.message };
+  }
+
+  redirect('/login?reset=done');
 }

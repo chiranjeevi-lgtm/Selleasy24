@@ -4,6 +4,7 @@ import { ApiError } from '@/lib/api';
 import { serverApi, type SellerListingDetail } from '@/lib/server-api';
 import { StatusBadge, StatusMeaning } from '@/components/status-badge';
 import { formatArea, formatDate, formatRupees } from '@/lib/format';
+import { MarketControls } from './market-controls';
 import {
   ConfirmAvailability,
   DocumentUploader,
@@ -104,7 +105,7 @@ export default async function SellerListingDetailPage({
           the behaviour buyers and sellers criticise incumbents for. */}
       {listing.rejectionReason && (
         <div className="mt-4 border-l-2 border-seal bg-seal-soft px-3.5 py-3">
-          <p className="stamp-label text-seal">Why it was not approved</p>
+          <p className="label text-seal">Why it was not approved</p>
           <p className="mt-1.5 text-[0.8125rem] leading-relaxed text-ink">
             {listing.rejectionReason}
           </p>
@@ -112,7 +113,7 @@ export default async function SellerListingDetailPage({
       )}
       {listing.revisionNote && (
         <div className="mt-4 border-l-2 border-action bg-surface px-3.5 py-3">
-          <p className="stamp-label text-action">Changes requested</p>
+          <p className="label text-action">Changes requested</p>
           <p className="mt-1.5 text-[0.8125rem] leading-relaxed text-ink">
             {listing.revisionNote}
           </p>
@@ -130,7 +131,7 @@ export default async function SellerListingDetailPage({
           },
         ].map((item) => (
           <div key={item.label} className="bg-surface px-3.5 py-3">
-            <dt className="stamp-label text-faint">{item.label}</dt>
+            <dt className="label text-faint">{item.label}</dt>
             <dd className="mt-1.5 text-[0.875rem] text-ink tabular">{item.value}</dd>
           </div>
         ))}
@@ -138,7 +139,7 @@ export default async function SellerListingDetailPage({
 
       {/* ---------------- Photos ---------------- */}
       <section className="mt-8" aria-labelledby="photos-heading">
-        <h3 id="photos-heading" className="stamp-label text-muted">
+        <h3 id="photos-heading" className="label text-muted">
           Photos ({listing.photos.length})
         </h3>
 
@@ -174,7 +175,7 @@ export default async function SellerListingDetailPage({
 
       {/* ---------------- Documents ---------------- */}
       <section className="mt-8 border-t border-line pt-6" aria-labelledby="docs-heading">
-        <h3 id="docs-heading" className="stamp-label text-muted">
+        <h3 id="docs-heading" className="label text-muted">
           Ownership documents ({listing.documents.length})
         </h3>
 
@@ -220,13 +221,12 @@ export default async function SellerListingDetailPage({
 
       {listing.status === 'APPROVED' && (
         <section className="mt-8 border-t border-line pt-6" aria-labelledby="avail-heading">
-          <h3 id="avail-heading" className="stamp-label text-muted">
-            Is it still available?
+          <h3 id="avail-heading" className="label text-muted">
+            Still available?
           </h3>
           <p className="mt-2 max-w-prose text-[0.8125rem] leading-relaxed text-muted">
-            Buyers see when you last confirmed this. Keeping it current is the
-            single most useful thing you can do — sold properties left online are
-            what buyers complain about most.
+            Buyers see when you last confirmed this, so keeping it current is
+            worth doing. If it has gone, the panel below is the one to use.
           </p>
           <div className="mt-3">
             <ConfirmAvailability listingId={listing.id} />
@@ -234,10 +234,67 @@ export default async function SellerListingDetailPage({
         </section>
       )}
 
+      {/*
+        Taking it off the market. Sits after "still available" deliberately —
+        the two answer the same question, and a seller who has just been asked
+        whether it is available should find "it sold" immediately below.
+      */}
+      <MarketControls
+        listingId={listing.id}
+        status={listing.status}
+        askingPrice={Math.round(Number(listing.price))}
+        pausedReason={listing.pausedReason ?? null}
+      />
+
+      {/* The sale record, once there is one. Shown back so the seller can see
+          what we hold — and it is the only place these figures appear. */}
+      {listing.status === 'SOLD' && (
+        <section className="mt-8 border-t border-line pt-6" aria-labelledby="sold-heading">
+          <h3 id="sold-heading" className="label text-muted">
+            Sale
+          </h3>
+          <dl className="mt-3 space-y-1.5 text-[0.875rem]">
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted">Marked sold</dt>
+              <dd className="text-ink">{formatDate(listing.soldAt) ?? '—'}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted">Asking price</dt>
+              <dd className="text-ink tabular">
+                {formatRupees(Math.round(Number(listing.price)))}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted">Sold for</dt>
+              <dd className="text-ink tabular">
+                {listing.soldPrice === null || listing.soldPrice === undefined
+                  ? 'You chose not to say'
+                  : formatRupees(Math.round(Number(listing.soldPrice)))}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted">Buyer from SellEasy24</dt>
+              <dd className="text-ink">
+                {listing.soldThroughPlatform === null ||
+                listing.soldThroughPlatform === undefined
+                  ? 'Not answered'
+                  : listing.soldThroughPlatform
+                    ? 'Yes'
+                    : 'No'}
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-3 max-w-prose text-[0.75rem] leading-relaxed text-faint">
+            These figures are never shown against your listing or to any buyer.
+            The sale price feeds the locality averages only in aggregate.
+          </p>
+        </section>
+      )}
+
       {/* ---------------- Verification history ---------------- */}
       {latestDecision && (
         <section className="mt-8 border-t border-line pt-6" aria-labelledby="history-heading">
-          <h3 id="history-heading" className="stamp-label text-muted">
+          <h3 id="history-heading" className="label text-muted">
             Latest verification
           </h3>
           <p className="mt-2 text-[0.8125rem] text-muted">

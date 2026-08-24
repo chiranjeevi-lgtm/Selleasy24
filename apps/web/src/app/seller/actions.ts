@@ -257,6 +257,76 @@ export async function confirmStillAvailable(
   return { ok: 'Thanks — buyers can see this is still available.' };
 }
 
+export async function pauseListing(
+  _prev: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const listingId = String(form.get('listingId') ?? '');
+  const reason = String(form.get('reason') ?? '').trim();
+
+  try {
+    await serverApi.pauseListing(listingId, reason || undefined);
+  } catch (error) {
+    return toState(error, 'Could not pause the listing.');
+  }
+
+  revalidatePath(`/seller/listings/${listingId}`);
+  revalidatePath('/seller/listings');
+  return { ok: 'Paused. Buyers can no longer see it, and you can put it back any time.' };
+}
+
+export async function resumeListing(
+  _prev: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const listingId = String(form.get('listingId') ?? '');
+
+  try {
+    await serverApi.resumeListing(listingId);
+  } catch (error) {
+    return toState(error, 'Could not put the listing back.');
+  }
+
+  revalidatePath(`/seller/listings/${listingId}`);
+  revalidatePath('/seller/listings');
+  return { ok: 'Back in front of buyers. No second review was needed.' };
+}
+
+/**
+ * Records a sale.
+ *
+ * Both details are optional, and the empty string has to become `undefined`
+ * rather than 0 — a seller who skips the price has not sold for nothing.
+ */
+export async function markListingSold(
+  _prev: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const listingId = String(form.get('listingId') ?? '');
+
+  const rawPrice = String(form.get('soldPrice') ?? '').trim();
+  const soldPrice = rawPrice ? Number(rawPrice) : undefined;
+
+  if (soldPrice !== undefined && (!Number.isFinite(soldPrice) || soldPrice <= 0)) {
+    return { error: 'That sale price could not be read. Leave it blank if you would rather not say.' };
+  }
+
+  const throughPlatform = String(form.get('soldThroughPlatform') ?? '');
+
+  try {
+    await serverApi.markListingSold(listingId, {
+      ...(soldPrice !== undefined && { soldPrice: Math.round(soldPrice) }),
+      ...(throughPlatform && { soldThroughPlatform: throughPlatform === 'yes' }),
+    });
+  } catch (error) {
+    return toState(error, 'Could not record the sale.');
+  }
+
+  revalidatePath(`/seller/listings/${listingId}`);
+  revalidatePath('/seller/listings');
+  return { ok: 'Recorded. The listing is off the market and anyone waiting on a visit has been told.' };
+}
+
 export async function setLeadStatus(
   _prev: ActionState,
   form: FormData,

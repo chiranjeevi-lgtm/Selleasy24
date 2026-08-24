@@ -119,6 +119,49 @@ export async function submitDecision(
   redirect('/queue');
 }
 
+/**
+ * Records a decision on a builder project.
+ *
+ * Same `check:<KIND>` collection as the listing decision. Which checks are
+ * mandatory depends on the project's stage and is enforced by the API — the
+ * form only renders the rows the API told it were required.
+ */
+export async function submitProjectDecision(
+  _prev: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const projectId = String(form.get('projectId') ?? '');
+  const decision = String(form.get('decision') ?? '');
+  const reason = String(form.get('reason') ?? '').trim();
+  const internalNotes = String(form.get('internalNotes') ?? '').trim();
+
+  const checks: Array<{ kind: string; passed: boolean; note?: string }> = [];
+  for (const [key, value] of form.entries()) {
+    if (!key.startsWith('check:')) continue;
+    const kind = key.slice('check:'.length);
+    const state = String(value);
+    // 'skip' means not applicable and is deliberately not recorded.
+    if (state === 'skip') continue;
+    const note = String(form.get(`note:${kind}`) ?? '').trim();
+    checks.push({ kind, passed: state === 'pass', ...(note ? { note } : {}) });
+  }
+
+  try {
+    await adminApi.decideProject(projectId, {
+      decision,
+      ...(reason ? { reason } : {}),
+      ...(internalNotes ? { internalNotes } : {}),
+      checks,
+    });
+  } catch (error) {
+    return toState(error, 'Could not record the decision.');
+  }
+
+  revalidatePath('/projects');
+  revalidatePath(`/projects/${projectId}`);
+  redirect('/projects');
+}
+
 export async function resolveReport(
   _prev: ActionState,
   form: FormData,

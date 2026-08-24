@@ -96,6 +96,12 @@ export interface SellerListingDetail {
   isVerified: boolean;
   rejectionReason: string | null;
   revisionNote: string | null;
+  /** Only you see this. Set when the seller takes the listing down for now. */
+  pausedReason: string | null;
+  soldAt: string | null;
+  /** Null when the seller chose not to say. Never shown to a buyer. */
+  soldPrice: string | null;
+  soldThroughPlatform: boolean | null;
   viewsCount: number;
   leadsCount: number;
   property: {
@@ -127,6 +133,12 @@ export interface SellerListingDetail {
   }>;
 }
 
+/**
+ * An enquiry, on either a resale listing or a builder project.
+ *
+ * Exactly one of `listing` and `project` is present — enforced by a CHECK
+ * constraint in the database, not merely by convention here.
+ */
 export interface SellerLead {
   id: string;
   name: string;
@@ -136,7 +148,15 @@ export interface SellerLead {
   status: string;
   contactedAt: string | null;
   createdAt: string;
-  listing: { id: string; title: string };
+  listing: { id: string; title: string } | null;
+  project: { id: string; name: string } | null;
+  /** Which configuration they asked about, when it was a project. */
+  projectUnit: {
+    id: string;
+    bedrooms: number;
+    areaSqft: number;
+    priceFrom: string;
+  } | null;
 }
 
 export interface CurrentUser {
@@ -153,6 +173,10 @@ export interface CurrentUser {
 export const serverApi = {
   me(): Promise<CurrentUser> {
     return authedRequest<CurrentUser>('/auth/me');
+  },
+
+  myStats(days = 30): Promise<SellerStats> {
+    return authedRequest(`/listings/mine/stats?days=${days}`);
   },
 
   myListings(): Promise<SellerListingSummary[]> {
@@ -208,6 +232,27 @@ export const serverApi = {
     return authedRequest(`/listings/${listingId}/confirm-availability`, { method: 'POST' });
   },
 
+  pauseListing(listingId: string, reason?: string): Promise<{ status: string }> {
+    return authedRequest(`/listings/${listingId}/pause`, {
+      method: 'POST',
+      body: JSON.stringify(reason ? { reason } : {}),
+    });
+  },
+
+  resumeListing(listingId: string): Promise<{ status: string }> {
+    return authedRequest(`/listings/${listingId}/resume`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  },
+
+  markListingSold(listingId: string, payload: unknown): Promise<{ status: string }> {
+    return authedRequest(`/listings/${listingId}/mark-sold`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
   myLeads(): Promise<SellerLead[]> {
     return authedRequest<SellerLead[]>('/leads/mine');
   },
@@ -223,6 +268,44 @@ export const serverApi = {
     Array<{ id: string; name: string; city: string; pincode: string }>
   > {
     return authedRequest(`/localities?city=${encodeURIComponent(city)}`);
+  },
+
+  // --- Buyer contact ---
+
+  sendEnquiry(listingId: string, payload: unknown): Promise<{ id: string }> {
+    return authedRequest(`/listings/${listingId}/enquiries`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  sendProjectEnquiry(projectId: string, payload: unknown): Promise<{ id: string }> {
+    return authedRequest(`/projects/${projectId}/enquiries`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  requestSiteVisit(listingId: string, payload: unknown): Promise<{ id: string; status: string }> {
+    return authedRequest(`/listings/${listingId}/site-visits`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  receivedSiteVisits(): Promise<SiteVisit[]> {
+    return authedRequest('/site-visits/received');
+  },
+
+  mySiteVisits(): Promise<SiteVisit[]> {
+    return authedRequest('/site-visits/mine');
+  },
+
+  respondToSiteVisit(id: string, payload: unknown): Promise<{ id: string; status: string }> {
+    return authedRequest(`/site-visits/${id}/respond`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
   },
 
   // --- Phone verification ---
@@ -249,6 +332,92 @@ export const serverApi = {
     });
   },
 
+  // --- Buyer preferences ---
+
+  buyerProfile(): Promise<BuyerProfile> {
+    return authedRequest('/buyers/me/profile');
+  },
+
+  saveBuyerPurpose(payload: unknown): Promise<BuyerProfile> {
+    return authedRequest('/buyers/me/profile/purpose', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  saveBuyerBudget(payload: unknown): Promise<BuyerProfile> {
+    return authedRequest('/buyers/me/profile/budget', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  saveBuyerLocalities(payload: unknown): Promise<BuyerProfile> {
+    return authedRequest('/buyers/me/profile/localities', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  saveBuyerAbout(payload: unknown): Promise<BuyerProfile> {
+    return authedRequest('/buyers/me/profile/about', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  recommendations(limit = 12): Promise<Recommendations> {
+    return authedRequest(`/buyers/me/recommendations?limit=${limit}`);
+  },
+
+  // --- Builder projects ---
+
+  myProjects(): Promise<BuilderProjectSummary[]> {
+    return authedRequest('/projects/mine');
+  },
+
+  myProject(id: string): Promise<BuilderProjectDetail> {
+    return authedRequest(`/projects/mine/${id}`);
+  },
+
+  createProject(payload: unknown): Promise<{ id: string }> {
+    return authedRequest('/projects', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  setProjectUnits(id: string, units: unknown): Promise<unknown> {
+    return authedRequest(`/projects/${id}/units`, {
+      method: 'PUT',
+      body: JSON.stringify({ units }),
+    });
+  },
+
+  submitProject(id: string): Promise<{ status: string }> {
+    return authedRequest(`/projects/${id}/submit`, { method: 'POST' });
+  },
+
+  uploadProjectPhoto(
+    id: string,
+    isRender: boolean,
+    form: FormData,
+  ): Promise<{ id: string; url: string; isRender: boolean }> {
+    return authedRequest(`/projects/${id}/photos?isRender=${isRender}`, {
+      method: 'POST',
+      body: form,
+    });
+  },
+
+  uploadProjectDocument(
+    id: string,
+    kind: string,
+    form: FormData,
+  ): Promise<{ id: string; kind: string }> {
+    const query = new URLSearchParams({ kind });
+    return authedRequest(`/projects/${id}/documents?${query.toString()}`, {
+      method: 'POST',
+      body: form,
+    });
+  },
+
   // --- Saved properties ---
 
   savedListings(): Promise<SavedList> {
@@ -267,6 +436,170 @@ export const serverApi = {
     return authedRequest(`/listings/${listingId}/save`, { method: 'DELETE' });
   },
 };
+
+export interface SiteVisit {
+  id: string;
+  status: 'REQUESTED' | 'CONFIRMED' | 'RESCHEDULED' | 'DECLINED' | 'CANCELLED' | 'COMPLETED';
+  preferredAt: string;
+  proposedAt: string | null;
+  confirmedAt: string | null;
+  note: string | null;
+  sellerNote: string | null;
+  createdAt: string;
+  listing: { id: string; title: string };
+  /** Present on the seller's view only — this is the one place it appears. */
+  buyer?: { fullName: string; phone: string | null; email: string };
+}
+
+export interface BuyerProfile {
+  purpose: 'LIVE_IN' | 'RENT_OUT' | 'INVESTMENT' | null;
+  householdSize: number | null;
+  bedroomsWanted: number | null;
+  budgetMin: number | null;
+  budgetMax: number | null;
+  occupation: string | null;
+  /** Never shown to a seller, and not used in ranking. */
+  monthlyIncome: number | null;
+  /** Null means they left partway, which is not the same as answering nothing. */
+  completedAt: string | null;
+  localities: Array<{ id: string; name: string; city: string }>;
+}
+
+export interface Recommendation {
+  id: string;
+  title: string;
+  price: number;
+  isVerified: boolean;
+  firstListedAt: string | null;
+  matchScore: number;
+  /** Shown to the buyer — an unexplained ranking is not worth having. */
+  reasons: string[];
+  property: {
+    address: string;
+    bedrooms: number;
+    bathrooms: number;
+    areaSqft: number;
+    propertyType: string;
+    locality: string;
+    city: string;
+  };
+  photos: Array<{ id: string; url: string }>;
+}
+
+export interface Recommendations {
+  /** False when we know nothing yet, so the caller can say so honestly. */
+  personalised: boolean;
+  items: Recommendation[];
+}
+
+export interface BuilderProjectSummary {
+  id: string;
+  name: string;
+  stage: string;
+  status: string;
+  isVerified: boolean;
+  address: string;
+  possessionDate: string | null;
+  deliveredOn: string | null;
+  reraNumber: string;
+  totalTowers: number | null;
+  totalUnits: number | null;
+  submittedAt: string | null;
+  verifiedAt: string | null;
+  firstListedAt: string | null;
+  rejectionReason: string | null;
+  revisionNote: string | null;
+  viewsCount: number;
+  leadsCount: number;
+  createdAt: string;
+  neighborhood: { name: string; city: string };
+  units: Array<{
+    bedrooms: number;
+    priceFrom: string;
+    totalUnits: number | null;
+    availableUnits: number | null;
+  }>;
+  coverUrl: string | null;
+  /** Null when no configuration records availability — not the same as zero. */
+  availableUnits: number | null;
+  priceFrom: string | null;
+  _count: { photos: number; documents: number; units: number };
+}
+
+export interface BuilderProjectDetail {
+  id: string;
+  name: string;
+  description: string;
+  stage: string;
+  status: string;
+  isVerified: boolean;
+  address: string;
+  pincode: string;
+  possessionDate: string | null;
+  deliveredOn: string | null;
+  reraNumber: string;
+  approvingAuthority: string | null;
+  totalTowers: number | null;
+  totalUnits: number | null;
+  landAreaAcres: string | null;
+  amenities: string[];
+  rejectionReason: string | null;
+  revisionNote: string | null;
+  viewsCount: number;
+  leadsCount: number;
+  submittedAt: string | null;
+  verifiedAt: string | null;
+  firstListedAt: string | null;
+  neighborhood: { id: string; name: string; city: string };
+  units: Array<{
+    id: string;
+    bedrooms: number;
+    bathrooms: number;
+    balconies: number | null;
+    areaSqft: number;
+    carpetAreaSqft: number | null;
+    priceFrom: string;
+    totalUnits: number | null;
+    availableUnits: number | null;
+    floorPlanUrl: string | null;
+  }>;
+  photos: Array<{ id: string; url: string; sortOrder: number; isRender: boolean }>;
+  documents: Array<{
+    id: string;
+    kind: string;
+    originalFilename: string;
+    sizeBytes: number;
+    createdAt: string;
+  }>;
+  verifications: Array<{
+    id: string;
+    decision: string;
+    reason: string | null;
+    createdAt: string;
+    checks: Array<{ kind: string; passed: boolean; note: string | null }>;
+  }>;
+}
+
+export interface SellerStats {
+  rangeDays: number;
+  totals: { views: number; saves: number; leads: number; live: number };
+  daily: Array<{ date: string; views: number; leads: number }>;
+  listings: Array<{
+    id: string;
+    title: string;
+    status: string;
+    isVerified: boolean;
+    price: number;
+    firstListedAt: string | null;
+    locality: string;
+    bedrooms: number;
+    areaSqft: number;
+    photo: string | null;
+    views: number;
+    saves: number;
+    leads: number;
+  }>;
+}
 
 export interface SavedListItem {
   savedAt: string;
