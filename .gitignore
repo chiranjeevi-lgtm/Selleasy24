@@ -34,8 +34,14 @@ yarn-error.log*
 coverage/
 .nyc_output/
 
-# Local uploads (dev only — production uses object storage)
-storage/
+# Local uploads (dev only — production uses object storage).
+#
+# Anchored to the one directory that actually holds them. An unanchored
+# `storage/` matches a directory of that name at ANY depth, which also caught
+# apps/api/src/common/storage — silently excluding the storage service and the
+# upload validation from the repository. Eighteen files import from there, so a
+# fresh clone could not build, and nothing said so.
+/apps/api/storage/
 uploads/
 tmp/
 
