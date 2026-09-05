@@ -1,0 +1,1053 @@
+PHASED ROADMAP — REPLICATING SQUARE YARDS' TECH FEATURES ON SELLEASY24
+========================================================================
+
+REVISED 2026-08-26 after direct audit of squareyards.com and Square Yards
+Deep Research Report 2026 (Complete Business & UX Analysis).
+
+Based on:
+  - Page-by-page audit of squareyards.com and its verticals (Urban Money,
+    Azuro, Interior Company, Data Intelligence, ChatGPT app) — see
+    squareyards-reference.md for the full crawl
+  - Square Yards Deep Research Report 2026 PDF (user-provided)
+  - SellEasy24 codebase state on branch square-yard-replica:
+    Next.js 15 + NestJS + Prisma + Postgres (PostGIS + pgvector) +
+    Redis/BullMQ + S3, with Phase 1 partially shipped
+
+See also:
+  - squareyards-reference.md  — page-by-page reference (keep open when
+                                planning any phase)
+  - offline.txt              — human/operational counterpart to this file
+
+Because pgvector and PostGIS are already in the stack, AI-search, map, and
+locality analytics features land earlier than they normally would.
+
+
+===============================================================================
+CROSS-CUTTING DESIGN PRINCIPLES
+===============================================================================
+
+These are product principles, not phase items. They govern every feature we
+ship from Phase 0 onwards. Each principle is a direct anti-pattern to
+Square Yards' most consistent third-party complaint themes (per Trustpilot /
+MouthShut / Glassdoor aggregation, see squareyards-reference.md §12).
+
+1. Written-commitment discipline
+   Every discount, cashback, refund, callback, or service promise is captured
+   as a signed PDF in-app before it takes effect. Verbal promises are
+   invalid by design. Square Yards' #1 complaint is verbal promises
+   (₹50k-₹1L cashbacks) that never convert to writing.
+
+2. Escrow-milestone for services
+   Any premium tier, featured listing, or service upsell above ₹5,000 flows
+   through milestone-based escrow (RazorpayX or bank escrow). Direct
+   anti-pattern to the Interior Company failure mode: 60% completion at
+   90% payment, ~₹12L customer losses documented.
+
+3. Hard cap on outbound contact frequency
+   After a buyer submits an enquiry: max 2 platform-initiated calls in
+   72 hours, max 1 SMS/day for 7 days, then silence. Anti-pattern to
+   pre-booking hyper-chase complaints. Configurable, but the default is
+   restrained.
+
+4. Verification recency as public signal
+   Every listing card renders "verified N hours ago by officer #V-023"
+   next to the badge. Turns our active pre-publish verification into a
+   visible superiority signal over Square Yards' passive-badge model
+   (their badge has no timestamp, no officer identity).
+
+5. On-domain trust content
+   Reviews, verification records, fraud reports, complaint outcomes all
+   live on our own domain, not routed to Google/Trustpilot/MouthShut.
+   Keeps the trust conversation on our surface (SEO + reputation win).
+
+6. Explainable AI only
+   Investment scores, valuations, recommendations always show inputs,
+   confidence, and last-computed timestamp. Never a black-box score.
+   Legal exposure under RBI unregulated-advice guidelines is real; a
+   transparent formula is the safe path.
+
+
+===============================================================================
+PHASE 0 — BASELINE (ALREADY BUILT)
+===============================================================================
+
+Before adding anything, this is what SellEasy24 already ships that Square
+Yards charges for OR does worse:
+
+Verification & trust
+  - Active pre-publish verification queue with document check + audit trail
+  - Encrypted document storage (apps/api/src/common/storage)
+  - Fraud report intake (in-app button on listings)
+  - Moderation queue for suspicious leads
+  - Ops dashboard with SLA tracking
+
+Buyer flows
+  - Browse, shortlist, enquire, request site visit, report fraud
+  - Compare shortlisted listings (CompareBar in root layout)
+  - Locality-based search with granular filters
+  - Recommendations for signed-in buyers with completed profile
+
+Seller flows (OWNER / BROKER / BUILDER roles)
+  - Draft → submit → verify → publish → pause / sold
+  - Photo/document upload with encryption
+  - Enquiry inbox with lead management
+  - Performance dashboard at /seller/performance
+  - Visit scheduling, phone-reveal control
+
+Search & filters (comprehensive — matches Square Yards parity today)
+  - possession, furnishing, facing, approving authority, ownership,
+    amenities (multi-select), floor range, property age
+  - Applied-filter chips with per-chip removal
+  - Shareable URL state (works without JS, indexable, back-button safe)
+
+Access control (8 roles)
+  - BUYER, OWNER, BROKER, BUILDER, VERIFIER, MODERATOR, ADMIN, SUPER_ADMIN
+  - Explicit @Roles() on every endpoint (no implicit hierarchy)
+  - Role-based admin console middleware
+
+Phase 1 (partial — shipped on branch square-yard-replica)
+  - PWA (manifest + icons + service worker + install prompt)
+  - Offline shell caching (static assets + last-visited pages)
+  - /map — interactive Hyderabad map with locality pins (Leaflet + OSM CDN)
+  - /nearby — GPS-based locality matcher
+  - /blog with 4 seeded posts
+  - hyderabad-localities.ts — 28 curated locality centroids + Haversine
+
+Gap analysis focus: everything below is additive.
+
+
+===============================================================================
+PHASE 1 — SEARCH UX EXTENSIONS & MONETIZATION SURFACE (4-6 WEEKS)
+===============================================================================
+
+Ship the remaining Phase 1 items that got deferred, plus Square Yards parity
+items that are cheap and obvious wins.
+
+REMAINING FROM ORIGINAL PHASE 1
+  - Per-listing pins on map — backfill Property.lat/lng
+      Path: seller UI adds drag-pin picker on new listings; existing
+            listings geocoded in a one-off batch via Nominatim (free) or
+            Google Geocoding.
+  - Distance-sorted search API — ?nearLat=&nearLng=&radiusKm=
+      Backend: PostGIS ST_DWithin on Property.geog column
+  - Owner dashboard analytics polish
+      Per-listing funnel (impressions → clicks → enquiries → visits)
+      Compare-to-locality-median widget
+
+NEW — RENT PARITY (Square Yards ranks #12 in replication priority)
+  Currently the app treats rent = sale. Square Yards has full rent parity;
+  this closes the gap.
+  - Rent-specific filters: monthly rent range, deposit multiples (1/2/3),
+    furnishing (furnished / semi / unfurnished), tenant preference
+    (family / bachelor male / bachelor female / company), pets allowed,
+    non-veg allowed, availability date, lease duration, zero-brokerage
+    toggle
+  - Rent card fields: monthly rent, deposit, floor/total floors,
+    furnishing, availability
+  - Copy anchor: "Zero-Brokerage Rentals — verified landlords, updated
+    daily" (direct parity with Square Yards' Zero-Deposit Rentals)
+
+NEW — OWNER PLANS PAGE (Square Yards /owner-plans, ranks #9)
+  First real revenue lever. Square Yards monetizes exactly this.
+  - Free tier: unlimited basic listings, direct lead forwarding
+  - Featured tier: badge + spotlight placement + prioritised lead delivery
+    + 6-month duration (pricing to decide with product; ₹499-₹2,999
+    range typical for Hyderabad market)
+  - Featured badge rendering on cards + search-result ranking boost
+  - Payment via Razorpay (full payment stack in Phase 6, but this specific
+    hook can use the basic Razorpay Checkout)
+
+NEW — PROJECT DETAIL POLISH (Square Yards convention, ranks #13)
+  - Sticky quick-action rail: Enquire / Site Visit / Brochure / EMI
+  - Configurations & pricing table per BHK / carpet area
+  - Master plan + floor plans per config (already in schema)
+  - Amenities grid, specifications block
+  - Bank loan tie-ups + EMI calculator embed (feeds Phase 2 calculator)
+  - Similar / nearby projects section
+
+NEW — BUILDER PROFILE PAGES (Square Yards /adl-projects/{id}/builder,
+    ranks #11)
+  - Route: /builders/{slug}
+  - Aggregates: all projects, RERA number, delivery track record (on-time %,
+    delayed count), average price band, total units delivered, contact
+  - Feeds investment score in Phase 2
+
+NEW — ANTI-FRAUD HELP DESK PAGE (Square Yards /fraud-identification,
+    ranks #8)
+  - Route: /fraud-help
+  - Educational content: how to spot fake agent, fake listing, RERA fraud,
+    portal cloning
+  - Hyderabad-specific: TSRERA verification steps, Telangana sub-registrar
+    lookup instructions, HMDA layout approval check
+  - Report form (routes into existing fraud queue)
+  - Copy anchor: "SellEasy24 never asks for advance payment to show a
+    property. Every officer's ID is visible before the visit."
+
+NEW — LOCALITY AUTOCOMPLETE + MULTI-SELECT
+  - Search bar upgrades to multi-select locality picker (Square Yards
+    convention)
+  - Typeahead against Locality table
+
+NEW — SORT OPTIONS
+  - Relevance (default), Price low→high, Price high→low, Newest,
+    Sqft low→high, Sqft high→low, Possession date
+
+Leverages: existing filter infrastructure, PostGIS, verification queue.
+
+
+===============================================================================
+PHASE 1.5 — SEO TEMPLATING LAYER (2-3 WEEKS)   [NEW — was missing]
+===============================================================================
+
+This phase was NOT in the original roadmap. It is the single biggest
+missing piece per the Square Yards audit. Ranks #1, #2, #3 in the
+replication priority list — collectively the highest value-per-effort in
+the entire program.
+
+Square Yards' SEO footprint is built on THREE URL templates, each producing
+thousands of pages. We replicate the templates for Hyderabad only —
+~2,000 SEO pages generated from templates in one sprint.
+
+FAMILY A — CANNED FILTER PERMALINKS (rank #1)
+  Pattern:
+    /sale/{bhk}-bhk-{propertyType}-in-{locality}-hyderabad
+    /sale/{bhk}-bhk-{propertyType}-in-{locality}-hyderabad-between-{lo}-{hi}
+    /rent/{bhk}-bhk-{propertyType}-in-{locality}-hyderabad
+    /sale/{propertyType}-for-sale-in-{locality}-hyderabad
+  Content: same search results as the equivalent /?filter=… URL, but
+    canonical, with a real H1 like
+    "3 BHK Flats for Sale in Kondapur, Hyderabad between ₹75 Lac and ₹1 Cr"
+  Generation: precompute ~2,000 slugs from top 20 localities × property
+    types × BHK × 5 budget bands. Render as static or ISR with 6-hour
+    revalidation.
+
+FAMILY B — LOCALITY OVERVIEW PAGES (rank #2)
+  Pattern: /localities/{slug}  (e.g. /localities/kondapur-hyderabad)
+  Sections:
+    - Hero: locality name + one-line price rate
+    - Map (Leaflet, reuses Phase 1 code)
+    - Price trend chart (1yr / 3yr / 5yr appreciation — depends on Phase 2)
+    - Pros / cons (from locality reviews UGC — Phase 2)
+    - Connectivity (schools, hospitals, malls, transit — from OSM data)
+    - Top projects in this locality
+    - Live resale + rent inventory (embeds existing search)
+    - Reviews (UGC — Phase 2)
+    - FAQ (Q&A per locality, hand-seeded to start)
+    - Nearby localities
+  Data: Locality + LocalitySnapshot (Phase 2) + Listing + Project
+  Note: page structure ships in Phase 1.5 with placeholder sections;
+    price-trend + reviews sections populate as Phase 2 lands.
+
+FAMILY C — PRICE-RATE MICRO-PAGES (rank #3)
+  Pattern: /property-rates/{locality}-hyderabad
+  Content: ONE H1, ONE number, ONE delta
+    "Kondapur Property Rates — ₹10,350/sq ft, +8.3% (3yr) | Aug 2026"
+    Plus short breakdown table (avg by BHK, avg by property type)
+  Generation: static, revalidated daily
+
+SEO INFRASTRUCTURE
+  - sitemap.xml auto-generated from all three families + core pages
+  - robots.txt hardened (explicit allow for the three families)
+  - Structured data (JSON-LD) on every page:
+      RealEstateListing on listing detail
+      Place on locality overview
+      LocalBusiness on homepage
+      FAQPage on locality overview
+  - Open Graph + Twitter cards on all generated pages
+  - Canonical URLs to prevent duplicate content penalties
+
+Depends on: nothing outside existing data (though Phase 2 makes the
+  locality pages meaningfully richer).
+Leverages: Next.js 15 static generation + ISR, existing search API.
+
+
+===============================================================================
+PHASE 2 — DATA INTELLIGENCE LAYER (8-12 WEEKS)
+===============================================================================
+
+Reframed based on Square Yards audit. Their Data Intelligence dashboard —
+8.6M gov-registered transactions, ET Proptech Innovation of the Year 2026
+award — is the single biggest competitive moat. We only need Hyderabad
+district data to reach parity in the local market, a much smaller data
+acquisition problem than SQ solved nationally.
+
+FEATURE 1 — TELANGANA REGISTRAR TRANSACTION INGESTION      [REFRAMED]
+  Originally scoped as "price history from our own snapshots"; expanded to
+  include actual government-registered sale transactions.
+  Data source: Telangana Registration & Stamps Department
+    (registration.telangana.gov.in) — Encumbrance Certificate + Sub-Registrar
+    records. Public, published for legal purposes.
+  Approach:
+    - Option A: scrape district-wise EC data (grey area on ToS; get legal
+      counsel review before commissioning)
+    - Option B: partner with Karza / Signzy / Digio for structured feed
+      (₹50-200 per query, clean legal path)
+    - Recommended: Option B for launch, Option A as fallback
+  New Prisma model: RegisteredTransaction
+    Fields: survey number, address, sale price, sale date, buyer type,
+            registration doc reference, source
+  Surface:
+    - "Last 10 registered transactions" widget on listing detail +
+      locality overview pages
+    - Actual-vs-listed price delta
+      ("Listed 8% above last registered sale in this building")
+    - Feeds e-valuation model (Feature 4)
+  Why it matters: this is Square Yards' award-winning moat and their
+    single biggest competitive advantage against 99acres / Housing.com /
+    NoBroker. Ranked #5 in replication priority.
+
+FEATURE 2 — LISTING PRICE HISTORY
+  New Prisma model: ListingPriceSnapshot
+    Fields: listingId, price, changedAt, changedBy
+  Backfill: initial snapshot for every existing listing
+  Hook: listing update endpoint inserts snapshot on price change
+  UI: "Price dropped ₹15L in 30 days" callout on detail page
+  Auto-alert saved-search subscribers on price movement (Phase 1 push
+    prereq needed)
+
+FEATURE 3 — RERA CROSS-CHECK AUTOMATION                    [DIFFERENTIATED]
+  Nightly BullMQ job: sync-rera-tsrera
+  New Prisma model: RegulatoryRegistration
+    Fields: reraNumber, projectName, promoter, registeredAt, expiresAt,
+            completionDeadline, status, lastCheckedAt
+  Auto-flag listings with mismatched / expired / not-found RERA numbers
+  Verifier UI shows auto-check result before opening the file
+  KEY DIFFERENTIATOR (from Cross-Cutting Principle #4):
+    Render "Verified 4 hours ago by officer #V-023 · RERA current" on
+    every card. Square Yards' passive badge has NO timestamp, NO officer
+    identity. This is a defensible marketing claim they cannot match
+    without breaking their own SLA.
+
+FEATURE 4 — LOCALITY ANALYTICS (feeds Phase 1.5 pages)
+  New Prisma model: LocalitySnapshot (daily row per locality)
+    Fields: localityId, date, medianPricePerSqft, listingCount,
+            avgDaysOnMarket, yoy1yr, yoy3yr, yoy5yr, transactionCount
+  Nightly BullMQ job: compute-locality-analytics
+  Consumed by: Phase 1.5 locality overview pages, listing benchmark widget,
+    investment score
+
+FEATURE 5 — AUTOMATED E-VALUATIONS
+  Backend service: ValuationService
+  Comparables model: PostGIS radius + configuration match + area
+    adjustment + recency weighting (uses Feature 2 + Feature 1 data)
+  New API endpoint: POST /valuations/estimate
+  UI:
+    - Standalone tool page: /tools/valuation
+    - Auto-shown market comparison on every listing detail
+    - Owner-facing tool ("What should I list at?") in seller dashboard
+  Anchors to Cross-Cutting Principle #6: always shows inputs, confidence,
+    last-computed timestamp.
+
+FEATURE 6 — INVESTMENT SCORE v1 (transparent formula)
+  Weighted signal:
+    +25 RERA verified + current
+    +20 locality YoY appreciation (scaled)
+    +15 developer track record (from Builder profile — Phase 1)
+    +15 infrastructure proximity (metro, ORR, airport — PostGIS distances)
+    +10 amenities completeness
+    +10 price vs. locality median
+    +5  photo/document completeness
+  Column: Listing.investmentScore, Project.investmentScore
+  UI: badge on cards ("Score 82 · Strong") + explanation panel on detail
+  Explanation panel shows every input + weight (Cross-Cutting Principle #6)
+
+FEATURE 7 — LOCALITY REVIEWS UGC        [NEW]
+  Square Yards /reviews/locality/*, ranks #10 in replication priority
+  Route: /localities/{slug}/reviews (linked from overview page)
+  New Prisma model: LocalityReview
+    Fields: userId, localityId, rating (1-5), pros, cons,
+            tenure (years at locality), moderationStatus
+  Moderation: routes through existing MODERATOR role
+  Anti-spam: verified account + one review per user per locality
+  Surface: on Phase 1.5 locality overview pages (pros/cons section)
+
+FEATURE 8 — EMI + ELIGIBILITY CALCULATOR       [MOVED FROM PHASE 5]
+  Square Yards /emi-eligibility-calculator, ranks #7
+  Standalone tool page: /tools/emi-calculator
+  Client-side only (no backend needed at this stage)
+  Inputs: loan amount, tenure, interest rate
+  Outputs: EMI, total interest, amortisation schedule
+  Second tool: eligibility calculator (income, existing EMIs, age, tenure)
+    → returns loan amount range
+  Embed on: every project detail, every listing with price >₹50L
+  Why moved from Phase 5: pure client-side, no bank partnerships needed;
+    ships in one day; feeds lead generation for Phase 5 when it lands.
+
+FEATURE 9 — ANTI-FRAUD HELP DESK (extended from Phase 1)
+  Already in Phase 1 as basic page. Extend here:
+  - Public directory of registered TSRERA agents (scraped nightly)
+  - "Check if a broker/agent is registered" tool
+  - Case-outcome log (moderated, PII-scrubbed, on-domain trust content)
+
+Leverages: existing verification data, PostGIS, pgvector, BullMQ.
+
+
+===============================================================================
+PHASE 3 — AI/ML PERSONALIZATION + ON-SITE CHAT (6-8 WEEKS)
+===============================================================================
+
+Promoted from original Phase 4: on-site conversational search moves here.
+Per Square Yards audit, their ChatGPT app is off-domain — their own site
+has NO conversational UI. Shipping ours on-property closes that gap while
+they still own only the off-domain surface.
+
+FEATURE 1 — LISTING EMBEDDINGS
+  Ingest description + amenities + locality → vector
+  Store in pgvector (already installed)
+  Refresh nightly via BullMQ
+  Model: OpenAI text-embedding-3-small (cheap) OR self-hosted
+    sentence-transformers (free, more infra)
+
+FEATURE 2 — BUYER PREFERENCE EMBEDDINGS
+  Derive from search history, saves, visit requests
+  Session-persistent for signed-out users (cookie/localStorage)
+  Explicit opt-in disclosed in Privacy Policy (DPDPA compliance)
+
+FEATURE 3 — PERSONALIZED RANKING
+  Cosine similarity + business rules
+  Rules: verified > unverified, fresh > stale, verified-recently >
+    verified-months-ago, in-budget > out-of-budget, RERA-current > expired
+
+FEATURE 4 — "MORE LIKE THIS" ON LISTING DETAIL
+
+FEATURE 5 — PHOTO QUALITY SCORING
+  Auto-flag watermarked, blurry, or below-threshold photos before verifier
+  Model: OpenAI CLIP OR Google Vision API OR self-hosted YOLO
+
+FEATURE 6 — SENTIMENT ANALYSIS ON ENQUIRIES
+  Surface high-intent leads to brokers
+  Flag suspicious enquiries to Moderator
+
+FEATURE 7 — ON-SITE CONVERSATIONAL SEARCH    [PROMOTED FROM PHASE 4]
+  Ranks #6 in replication priority; Square Yards has left this gap open.
+  Floating chat widget on every page ("Ask about homes")
+  LLM: OpenAI GPT-4o-mini or Claude Haiku
+  RAG over listing embeddings (pgvector, from Feature 1)
+  Query modes:
+    - Natural language search:
+      "3 BHK in Kokapet under 1.5 Cr with clubhouse"
+      → extracts filters → runs existing search API
+    - Property questions:
+      "What's the metro connectivity like in Kondapur?"
+      → RAG over locality overview page content
+    - Verification questions:
+      "How does this differ from Housing.com?"
+      → answers from a static knowledge base
+  Guardrails:
+    - Cannot make investment recommendations (regulated)
+    - Cannot claim specific unverified prices
+    - Every answer sourced with a link back to the source
+  Cost management: rate-limit anonymous, higher limits for signed-in
+
+Leverages: pgvector, BullMQ, existing search API.
+
+
+===============================================================================
+PHASE 4 — WHATSAPP + CHATGPT BOTS (4-6 WEEKS)
+===============================================================================
+
+On-site conversational search moved to Phase 3. This phase now owns only
+the off-platform messaging surfaces.
+
+FEATURE 1 — WHATSAPP AI BOT
+  Meta Cloud API (direct — cheapest, more setup) OR aggregator
+  (Interakt / Wati / AiSensy — easier, pricier)
+  User flows:
+    - Search: "3 BHK Kokapet 1.5cr" → returns 3 top matches + links
+    - Save: "Save this" → adds to shortlist (linked account required)
+    - Visit reminder: 24h before scheduled site visit
+    - Price alerts on saved searches (opt-in only, DPDPA compliance)
+    - Verification receipt: "Your listing was verified by officer #V-023"
+  Requires: verified Meta Business, GSTIN, WhatsApp Business API approval
+    (5-15 business days)
+
+FEATURE 2 — CHATGPT APP / CUSTOM GPT
+  Publish Custom GPT via OpenAI GPT Builder
+  Exposes /listings/search + /localities as authenticated tools
+  Query surface: "Find me verified homes in Hyderabad's Kondapur under 1cr"
+  Users get answers inside ChatGPT.com with deep links back to us
+  Marketing anchor: Square Yards was first Indian proptech on ChatGPT
+    (Jun 2026). Our claim can be "first with human-verification metadata
+    in ChatGPT" — a defensible angle they don't have.
+  Setup: 1-2 days using GPT Builder + Custom GPT plan.
+
+FEATURE 3 — TELEGRAM BOT (optional)
+  Same query surface, different messaging channel
+  Lower priority — WhatsApp dominates India
+
+Leverages: on-site conversational search backend from Phase 3
+  (same LLM + RAG plumbing).
+
+
+===============================================================================
+PHASE 5 — FINANCING LAYER (URBAN MONEY ANALOG) (10-14 WEEKS)
+===============================================================================
+
+EMI + eligibility calculators moved to Phase 2 (standalone tools). Phase 5
+now focuses on lender integrations that require legal + partnership work.
+
+Sequence within phase:
+  Weeks 1-2   Multi-lender loan application form (unified UX)
+  Weeks 3-4   First bank API integration (HDFC or Bajaj Finserv — pick
+              most developer-friendly)
+  Weeks 5-6   DSA registration process kicked off with 3-5 lenders
+  Weeks 7-10  Second + third bank integrations
+  Weeks 11-14 Comparison view, credit bureau pull, insurance distribution
+
+Regulatory realities:
+  - DSA agreements with each lender (contract, not code)
+  - IRDAI Corporate Agent registration for insurance (₹50L net worth
+    requirement — big undertaking; recommend PARTNERING with an existing
+    corporate agent instead of licensing yourself)
+  - Fair Practices Code + APR disclosure per RBI directive
+  - Ombudsman scheme for complaint resolution
+
+Structure: consider spinning as sub-module (loan.selleasy24.com or /loans)
+  rather than bolting into listings. Urban Money is a separate subdomain
+  for the same reason.
+
+Explicit non-goal: DO NOT try to reach Urban Money's scale (100+ lenders).
+Ship 3-5 bank partnerships + calculator + comparison. That covers 80% of
+Hyderabad buyer intent.
+
+
+===============================================================================
+PHASE 6 — TRANSACTIONS & DOCUMENTATION (8-10 WEEKS)
+===============================================================================
+
+Blockchain deprioritized to zero based on audit: Square Yards shows NO
+evidence of using blockchain for property records; the RBI Innovation Hub
+partnership is the institutional equivalent. Deleted from scope.
+
+FEATURE 1 — DIGITAL AGREEMENT TEMPLATES
+  Sale agreement, rental agreement, TDS declaration
+  PDF generation from Jinja-style templates (drafted + approved by Legal)
+
+FEATURE 2 — AADHAAR ESIGN INTEGRATION
+  Via NSDL / eMudhra / Digio (pick one aggregator; 4-8 weeks onboarding)
+  Legally valid under IT Act 2000 Section 3A
+
+FEATURE 3 — PAYMENT GATEWAY
+  Razorpay or Cashfree
+  Handles: token amounts, visit booking fees, featured listing payments
+    (from Phase 1 monetization)
+
+FEATURE 4 — DIGITAL ESCROW
+  Partner: RazorpayX Escrow (fastest — 4-6 weeks setup)
+  Milestone-driven releases per Cross-Cutting Principle #2
+  Bank-held funds, platform mediates the API
+
+FEATURE 5 — WRITTEN-COMMITMENT LEDGER     [NEW — Principle #1 in code]
+  Every promise (cashback, discount, callback, refund window) captured
+  as signed PDF at the moment of commitment.
+  Stored in encrypted document store; linked to Enquiry / Deal record.
+  Enforcement: if a rep tries to record a verbal promise anywhere in the
+  admin console, the UI requires signed PDF + counterparty acknowledgment
+  before it can be logged.
+
+DELETED FROM ORIGINAL SCOPE
+  - Blockchain property records. No evidence Square Yards does this. RBI
+    Innovation Hub handles the institutional version.
+
+
+===============================================================================
+PHASE 7 — IMMERSIVE MEDIA & ADVANCED (OPEN-ENDED)
+===============================================================================
+
+Unchanged from original.
+
+  - 360° tour uploader (sellers upload equirectangular JPGs, render with
+    Pannellum — free, open-source)
+  - 3D walkthroughs via Matterport partnership (Square Yards owns this as
+    PropVR in-house; we integrate, don't build)
+  - AI virtual staging via API (VirtualStagingAI, Collov)
+  - AR property view on mobile (WebXR — genuinely useful for plots)
+  - Native iOS/Android apps (React Native — only after PWA metrics
+    justify the additional codebase)
+  - Voice AI calling (Exotel + Whisper + Indic LLM;
+    TRAI DND compliance required — legal-heavy, high risk)
+  - SaaS spin-out — package CRM/verification tools for other markets
+
+DEFERRED FEATURES FROM USER CONVERSATIONS
+  - "SellEasy Agent" — field-agent-assisted listing (owner requests →
+    agent visits → agent lists on their behalf → commission). Substantial
+    new workstream; user has explicitly deferred build. Would slot as
+    Phase 2.5 when unlocked. See memory notes for design considerations.
+
+
+===============================================================================
+SUGGESTED SEQUENCING RATIONALE
+===============================================================================
+
+  Cross-Cutting Principles first
+    These are design-time constraints. Every phase must respect them.
+    Apply retroactively to Phase 0 baseline where practical.
+
+  Phase 1 (remaining) + Phase 1.5 in parallel
+    Phase 1 remainders (rent parity, owner plans, project polish, builder
+    profiles) unblock revenue. Phase 1.5 SEO templating is the biggest
+    single traffic lever we're missing — ship these in one 6-week sprint
+    if two devs are available.
+
+  Phase 2 next
+    Data Intelligence + registrar ingestion + locality reviews UGC
+    directly attack Square Yards' strongest moat. RERA automation
+    reduces verifier workload. EMI calculator is a lead magnet.
+
+  Phase 3 (AI + on-site chat)
+    Uses pgvector already installed. On-site conversational search closes
+    the ChatGPT-app gap where Square Yards left it open.
+
+  Phase 4 (off-platform bots)
+    Runs in parallel with Phase 5 preparation. Both need external accounts.
+
+  Phase 5 + Phase 6 pipeline in parallel
+    Both need legal + partnerships. Lawyers stay busy while devs ship.
+
+  Phase 7 last
+    3D/AR/native/voice are expensive. Don't build before 10k active
+    listings or a concrete customer pulling for them.
+
+
+===============================================================================
+REALISTIC TOTAL TIMELINE
+===============================================================================
+
+  Solo dev, ~10 hrs/week:
+    Phase 1 remaining + 1.5 in ~4 months
+    Phase 2 in ~4 more months
+    Phase 3 in ~3 months
+    Total to Phase 3: ~11 months
+    Phase 4+ deferred
+
+  Team of 3 (2 backend, 1 frontend), full-time:
+    Phase 1 remaining + 1.5 in ~6 weeks
+    Phase 2 in ~10 weeks
+    Phase 3 + 4 in ~10 weeks
+    Phase 5 + 6 by month 9
+    Phase 7 as differentiators after month 12
+
+  Team of 8+ (Square Yards scale):
+    All phases in ~9 months
+    But you don't need Square Yards scale to win Hyderabad
+
+
+===============================================================================
+THE HONEST CUT (updated post-audit)
+===============================================================================
+
+Square Yards has ₹2,086 Cr revenue and 8,000+ employees. Their biggest
+consumer complaint is that their OFFLINE handoff breaks the trust their
+software promises (Trustpilot / MouthShut aggregation shows a consistent
+pattern: pre-booking hyper-chase, post-booking silence, verbal promises
+never in writing, Interior Company delivery failures).
+
+SellEasy24's wedge is precisely that gap: active pre-publish verification,
+on-domain trust content, written-commitment discipline, escrow-milestone
+service tiers, hard cap on outbound contact. None of those require Square
+Yards' scale.
+
+Ranked by defensibility for a small Hyderabad-focused team:
+
+  1. Cross-Cutting Principles
+     Product / design commitments — free to ship, hard for a big
+     commission-driven org to copy.
+
+  2. Phase 1.5 SEO templating
+     Traffic acquisition — biggest lever we're missing today.
+
+  3. Phase 2 registrar-data ingestion
+     Data moat. Hyderabad-only is manageable; national is not.
+
+  4. Verification recency signal (Cross-Cutting + Phase 2)
+     "Verified 4h ago by officer #V-023" — Square Yards' passive badge
+     cannot match this.
+
+  5. Phase 3 on-site conversational search
+     They left this gap open. We take it.
+
+Phases 1.5, 2, and 3 alone give SellEasy24 a defensible product that
+competes on more than "another listings site." Everything from Phase 4
+onwards is scale-up territory.
+
+
+===============================================================================
+USER-SIDE PREREQUISITES BY PHASE
+===============================================================================
+
+Every phase needs things you (not the code) must supply: API keys, accounts,
+data files, regulatory approvals. Review before starting each phase so you
+don't get blocked mid-build.
+
+Legend:
+  [FREE]       no cost
+  [PAID]       has a cost; typical range shown
+  [REGULATED]  needs licence / registration
+
+
+PHASE 1 — Search UX + Monetization
+-----------------------------------
+
+Accounts / APIs
+  [PAID]  Razorpay merchant account (Featured listing payments)
+          Setup: 1-2 weeks with GSTIN + bank account
+          Fees: 2% + GST per transaction
+  [FREE]  Nominatim (self-hosted or public — for backfilling
+          Property.lat/lng of existing listings)
+  [PAID]  Google Geocoding API — optional, $5 per 1000 addresses
+  [FREE]  OpenStreetMap tiles via Leaflet CDN (already in use)
+
+Data you must supply
+  - PNG icons at 192x192 and 512x512 (optional — SVG icons already work,
+    iOS prefers PNG for splash screens)
+  - Locality autocomplete seed (already have curated list of 28
+    Hyderabad localities in hyderabad-localities.ts)
+  - Featured-tier pricing decision (₹499 / ₹999 / ₹1,999 / ₹2,999?)
+
+Regulatory
+  - None new for Phase 1
+
+Timeline blockers
+  - Razorpay merchant approval: 1-2 weeks
+  - Nothing else
+
+
+PHASE 1.5 — SEO Templating
+---------------------------
+
+Accounts / APIs
+  [FREE]  Google Search Console + Bing Webmaster Tools
+          (submit sitemap.xml once generated)
+  [FREE]  schema.org validators (schema.org/validator, Google Rich Results)
+
+Data you must supply
+  - FAQ content per locality (start with 5 Q&A per top-20 localities;
+    can be hand-seeded, ~2 hours per locality of writing)
+  - Locality photos (1 hero per locality; can source from Unsplash for MVP)
+  - Copy for the "About this locality" narrative on each overview page
+    (~200 words per locality)
+
+Regulatory
+  [REGULATED] Legal review of any auto-generated review content
+             (defamation risk on locality reviews UGC — moderate before
+             publish)
+
+Timeline blockers
+  - None external. Content writing is the pacing item.
+
+
+PHASE 2 — Data Intelligence
+----------------------------
+
+Accounts / APIs
+  [FREE]     Telangana RERA public portal (rera.telangana.gov.in)
+             Public data. Scraping is grey area but common — get Legal
+             review before commissioning.
+  [PAID]     Karza / Signzy / Digio for automated title & EC + registrar
+             pulls
+             Cost: ₹50-200 per lookup
+             Timeline: 2-3 weeks onboarding + KYC
+  [FREE]     Nominatim for locality centroid enrichment
+  [PAID]     Google Geocoding API alternative ($5/1000)
+  [FREE]     OpenStreetMap Overpass API for connectivity data
+             (schools / hospitals / metro stations within a locality)
+
+Data you must supply
+  - Seed developer track record data (past projects, delivery status,
+    complaint history) — scrape from RERA + manually curate top 30
+    Hyderabad builders
+  - Optional: purchase transaction data from PropEquity or Anarock
+    if registrar ingestion is delayed
+
+Regulatory
+  [REGULATED] Publishing valuation figures publicly — consider RBI
+              guidelines on unregulated financial advice. Disclaimer
+              usually suffices; check with Legal.
+  [REGULATED] Locality reviews UGC — moderation policy required per
+              IT Rules 2021
+
+Timeline blockers
+  - Karza onboarding: 2-3 weeks
+  - Formal TSRERA API access (if pursued): 6-12 weeks
+  - Both can proceed in parallel with Phase 1 / 1.5
+
+
+PHASE 3 — AI/ML + On-Site Chat
+-------------------------------
+
+Accounts / APIs
+  [PAID]  OpenAI account (embeddings + optional chat)
+          text-embedding-3-small: ~$0.02 per 1M tokens
+          GPT-4o-mini for chat: ~$0.15 per 1M input tokens
+          Estimate: for 10k listings, one-time embed cost < $10, refresh
+          ~$5/month. Chat cost scales with volume: ₹5,000-30,000/month.
+          Sign up: platform.openai.com
+  [PAID]  Alternative: Anthropic Claude Haiku for chat
+          Similar cost profile, better tool-use for structured filters
+  [FREE]  Self-hosted embeddings: sentence-transformers on your infra
+          (Hugging Face models, MIT-licensed)
+  [PAID]  Photo moderation (auto-flag watermarked/blurry photos)
+          Google Cloud Vision: ~$1.50 per 1000 images
+          AWS Rekognition: ~$1 per 1000 images
+          Self-host: OpenCV + YOLO (free but needs ML ops)
+  [FREE]  pgvector (already installed in your Postgres)
+
+Data you must supply
+  - Static knowledge base content for chat guardrails
+    (verification meaning, RERA basics, "how does this differ from X"
+    canned answers) — ~2 days of writing
+  - Optional: label ~500 photos as good/bad for photo-quality model tuning
+
+Regulatory
+  [REGULATED] DPDPA: buyer behavior tracking for personalization requires
+              disclosure in Privacy Policy + opt-out mechanism
+  [REGULATED] AI-generated answer disclaimer on chat surface
+
+Timeline blockers
+  - OpenAI account: instant
+  - Google Cloud / AWS: 1-2 days business verification
+
+
+PHASE 4 — WhatsApp + ChatGPT Bots
+----------------------------------
+
+Accounts / APIs
+  [PAID]  OpenAI account (same as Phase 3, higher usage)
+  [PAID]  WhatsApp Business API
+          Options:
+            - Meta Cloud API (direct, cheapest, more setup)
+            - Interakt / Wati / AiSensy (aggregators, easier, pricier)
+          Cost:
+            - Meta: ₹0.85 per user-initiated conversation, ₹0.60 utility
+            - Aggregators: ₹2,000-8,000/month + per-message
+          Approval timeline: 5-15 business days
+          Requirements: verified Facebook Business, GSTIN, display name
+  [PAID]  ChatGPT Custom GPT — requires ChatGPT Plus / Team
+          Your API must be publicly accessible over HTTPS
+
+Data you must supply
+  - Sample query examples for training the NL-to-filter mapper
+  - WhatsApp business display name + logo + description
+  - Facebook Business Manager account (verified)
+
+Regulatory
+  [REGULATED] WhatsApp opt-in: explicit consent required before you can
+              send notifications (24-hour marketing window rule)
+  [REGULATED] TRAI DND regulations for SMS
+  [REGULATED] Consent capture in database (policy version + timestamp)
+
+Timeline blockers
+  - WhatsApp Business API approval: 5-15 business days
+  - Chatbot fine-tuning: 2-4 weeks post-launch to reach useful quality
+
+
+PHASE 5 — Financing (Urban Money analog)
+-----------------------------------------
+
+Accounts / APIs
+  [PAID]     Credit bureau access
+             TransUnion CIBIL: ₹4-5 lakh setup + ₹15-50 per pull
+             Experian: ₹3 lakh setup + ₹10-40 per pull
+             Timeline: 4-8 weeks onboarding
+  [FREE-ish] DSA registrations with banks/NBFCs
+             Start with: HDFC, ICICI, Axis, Bajaj Finserv, LIC Housing
+             Free registration but requires KYC + agreement
+             Timeline: 3-6 weeks per bank
+  [PAID]     Insurance
+             IRDAI Corporate Agent (Composite): ₹50L net worth needed
+             Recommended alternative: partner with existing corporate
+             agent, take a revenue share
+
+Data you must supply
+  - Company GSTIN, PAN, incorporation certificate
+  - Directors' KYC (Aadhaar, PAN)
+  - Company financials (last 2 years — for corporate agent licence)
+  - Founder profile / experience
+
+Regulatory
+  [REGULATED] DSA agreements with each lender
+  [REGULATED] IRDAI Corporate Agent (major undertaking)
+  [REGULATED] Fair Practices Code disclosure on the site
+  [REGULATED] APR (not just interest rate) required in comparisons
+             — RBI directive
+  [REGULATED] Complaint resolution mechanism (Ombudsman scheme)
+  [REGULATED] Aadhaar eKYC needs UIDAI approval
+
+Timeline blockers
+  - DSA agreements: 3-6 months to get 5 banks live
+  - Bureau access: 4-8 weeks
+  - IRDAI corporate agent (if pursued): 6-12 months
+
+
+PHASE 6 — Transactions & Documentation
+---------------------------------------
+
+Accounts / APIs
+  [PAID]  Aadhaar eSign aggregator
+          NSDL, eMudhra, Digio: ₹10-40 per signature
+          Timeline: 4-8 weeks onboarding + testing
+  [PAID]  Payment gateway
+          Razorpay / Cashfree: 2% + GST per transaction
+          Setup: 1-2 weeks with GSTIN + bank account
+  [PAID]  Digital escrow
+          RazorpayX Escrow: 4-6 weeks setup, ₹15-30 per txn
+          ICICI Bank Escrow: 3-6 months setup, higher fees, institutional
+
+Data you must supply
+  - Legal templates: sale agreement, rental agreement, TDS forms
+    (get from Legal counsel — see offline.txt §3)
+  - Company bank account for platform fees (separate from escrow account)
+  - GSTIN for invoicing
+  - Aadhaar of authorized signatory (for eSign onboarding)
+
+Regulatory
+  [REGULATED] IT Act 2000 Section 3A: eSign legally valid via Aadhaar OTP
+             or DSC — you cannot use "click to sign" alone
+  [REGULATED] Stamp duty payment on agreements (varies by state)
+  [REGULATED] TDS on rent >₹50k/month (10% under Section 194IB)
+  [REGULATED] PCI-DSS: handled by Razorpay for card data
+
+Timeline blockers
+  - Razorpay Escrow: 4-6 weeks
+  - eSign aggregator: 4-8 weeks
+  - Legal template review: 2-4 weeks
+
+REMOVED FROM PHASE 6
+  - Blockchain / Polygon wallet: no evidence Square Yards uses blockchain
+    for property records. RBI Innovation Hub does the institutional
+    equivalent. Dropped from scope.
+
+
+PHASE 7 — Immersive & Advanced
+-------------------------------
+
+Accounts / APIs
+  [PAID]  Matterport partnership
+          Camera hardware: Pro3 ~₹4L, Axis S1 ~₹5L, or use iPhone
+          Cloud hosting: $69-309 per space per month
+          Alternative: hire local Matterport-certified operators per shoot
+  [PAID]  AI virtual staging: VirtualStagingAI / Collov / Interior AI
+          $10-40 per photo
+  [PAID]  Voice AI (SuperAgent Pro analog)
+          Telephony: Exotel / Knowlarity / Ozonetel
+                     ₹5,000-25,000/month + per-min charges
+          Speech-to-text: OpenAI Whisper API, ₹5 per audio minute
+          Text-to-speech: OpenAI TTS or ElevenLabs
+          LLM: OpenAI GPT-4o-mini
+          Total ops cost: ₹1-3 per call minute
+  [PAID]  Native mobile apps
+          Apple Developer: $99/year
+          Google Play Developer: $25 one-time
+          React Native / Expo: free (recommended over Swift/Kotlin)
+  [PAID]  Video hosting: Cloudflare Stream / Mux / AWS MediaConvert
+
+Data you must supply
+  - Photographer network (for 3D scanning) or in-house camera operator
+  - Voice AI: scripts, escalation rules, business hours
+  - App store assets: screenshots, feature graphics, description copy
+
+Regulatory
+  [REGULATED] Voice AI: TRAI DND compliance — no calls to DND numbers
+             without prior consent
+  [REGULATED] App Store review: Apple has strict real-estate app rules
+             (clear disclaimers on legal advice required)
+  [REGULATED] Google Play: financial-services categorization requires
+             KYC of publisher
+
+Timeline blockers
+  - Matterport certification: 1-2 weeks self-paced
+  - Voice AI legal review: 4-6 weeks (India regulatory landscape unclear)
+  - App Store first review: 1-2 weeks (subsequent updates faster)
+
+
+===============================================================================
+CROSS-CUTTING PREREQUISITES (needed for multiple phases)
+===============================================================================
+
+INCORPORATION / COMPANY BASICS
+  Before you can integrate ANY paid API or open a merchant account:
+  - Registered company (Pvt Ltd recommended over LLP for external investment)
+  - GSTIN
+  - PAN + TAN
+  - Current account with a bank
+  - MCA compliance (annual filings)
+
+DOMAINS & HOSTING
+  - Primary domain (selleasy24.com)
+  - HTTPS certificate (Let's Encrypt free, or paid SSL)
+  - Email domain (support@, verification@, fraudreport@, hello@)
+  - Hosting: Vercel for web (~$20/mo), Railway / AWS / GCP for backend
+
+MONITORING & OBSERVABILITY
+  - Sentry (error tracking): free tier or ₹2,000/mo
+  - PostHog / Amplitude (product analytics): free tier available
+  - Uptime monitoring: BetterUptime, UptimeRobot (free)
+
+COMPLIANCE CHECKLIST YOU MUST NOT SKIP
+  [ ] Terms of Service (see offline.txt §3)
+  [ ] Privacy Policy (DPDPA-compliant)
+  [ ] Cookie consent banner
+  [ ] Grievance Officer designation (required under IT Rules 2021)
+  [ ] Data breach notification process
+  [ ] KYC of all users transacting > ₹50k
+  [ ] AML monitoring for transactions > ₹10L (report to FIU-IND)
+
+
+===============================================================================
+QUICK REFERENCE — PROCUREMENT ORDER
+===============================================================================
+
+Before Phase 1 (extensions):
+  [ ] Razorpay merchant account (for Featured tier payments)
+  [ ] Legal counsel retainer signed (see offline.txt §3)
+
+Before Phase 1.5:
+  [ ] Google Search Console + Bing Webmaster access
+  [ ] Locality FAQ + narrative content drafted (~40 hours)
+
+Before Phase 2:
+  [ ] Karza / Signzy account (title/EC/registrar lookups)
+  [ ] Sentry + monitoring accounts
+  [ ] Legal review of TSRERA scraping approach
+
+Before Phase 3:
+  [ ] OpenAI OR Anthropic account
+  [ ] Google Cloud / AWS account (photo moderation)
+  [ ] Privacy Policy updated for personalization + AI chat
+
+Before Phase 4:
+  [ ] Facebook Business Manager verified
+  [ ] WhatsApp Business API access
+  [ ] ChatGPT Plus/Team subscription
+
+Before Phase 5:
+  [ ] DSA agreements signed with 3+ banks
+  [ ] Credit bureau agreement (CIBIL or Experian)
+  [ ] Company financials audited
+
+Before Phase 6:
+  [ ] Razorpay account + escrow application submitted
+  [ ] eSign aggregator selected + KYC completed
+  [ ] Legal templates in hand (sale, rental, TDS)
+
+Before Phase 7:
+  [ ] Matterport certification OR photographer partnership
+  [ ] Apple + Google developer accounts
+  [ ] Voice AI vendor + TRAI DND compliance review
+
+
+===============================================================================
+SEE ALSO
+===============================================================================
+
+  offline.txt — human/operational counterpart. Every phase here has an
+                offline equivalent that must exist for the feature to
+                deliver customer value.
+
+  squareyards-reference.md — page-by-page reference of what Square Yards
+                             ships today. Consult when planning any phase.
+
+  Together: build online + offline in lockstep. A verification feature
+  with no verification team is useless; an escrow API with no bank
+  partnership cannot process money. Read all three docs, plan all three,
+  budget all three.

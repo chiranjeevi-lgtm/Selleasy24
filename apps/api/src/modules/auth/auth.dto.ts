@@ -42,6 +42,33 @@ export type VerifyOtpDto = z.infer<typeof verifyOtpSchema>;
 const emailSchema = z.string().trim().toLowerCase().email('Enter a valid email address').max(255);
 
 /**
+ * Username — alternative sign-in identifier alongside email.
+ *
+ * Lowercased at write, unique. Constrained so a username can never be
+ * mistaken for an email (must not contain '@') and never collides with
+ * URL routing conventions (letters, digits, underscore only, no dot or
+ * slash).
+ */
+const usernameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(3, 'Username must be at least 3 characters')
+  .max(30, 'Username must be at most 30 characters')
+  .regex(/^[a-z0-9_]+$/, 'Username can only contain lowercase letters, digits and underscore');
+
+/**
+ * Login identifier — email or username. Distinguished by presence of '@';
+ * downstream code looks up by the right column.
+ */
+const loginIdentifierSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(3, 'Enter your email or username')
+  .max(255);
+
+/**
  * Registration.
  *
  * `role` is deliberately restricted to BUYER, OWNER and BROKER. Staff roles are
@@ -52,12 +79,30 @@ const emailSchema = z.string().trim().toLowerCase().email('Enter a valid email a
 export const registerSchema = z
   .object({
     email: emailSchema,
+    /**
+     * Username is required for new signups so every new account has both
+     * identifiers from day one. Legacy accounts (from before this field
+     * shipped) have username = null and continue to sign in via email.
+     */
+    username: usernameSchema,
     password: passwordSchema,
     fullName: z.string().trim().min(2, 'Enter your full name').max(255),
     phone: phoneSchema.optional(),
     role: z.enum([Role.BUYER, Role.OWNER, Role.BROKER]).default(Role.BUYER),
     /** Required for brokers — RERA registration is a legal precondition to list. */
     reraNumber: z.string().trim().min(3).max(64).optional(),
+    /**
+     * Optional referral code carried through from the `?ref=CODE` URL param
+     * on the register page. Validated leniently here — the ReferralsService
+     * normalises + does the strict check + swallows invalid codes so a
+     * mistyped code never fails the signup itself.
+     */
+    referralCode: z
+      .string()
+      .trim()
+      .max(16)
+      .regex(/^[a-zA-Z0-9]*$/, 'Referral codes are letters and numbers only')
+      .optional(),
   })
   .refine((data) => data.role !== Role.BROKER || Boolean(data.reraNumber), {
     message: 'Brokers must supply a RERA registration number',
@@ -67,7 +112,11 @@ export const registerSchema = z
 export type RegisterDto = z.infer<typeof registerSchema>;
 
 export const loginSchema = z.object({
-  email: emailSchema,
+  /**
+   * Email OR username. The '@' character decides which column to look up;
+   * usernames are validated to never contain '@' so the two cannot overlap.
+   */
+  identifier: loginIdentifierSchema,
   // No policy validation on login: rules apply when setting a password, and
   // enforcing them here would leak the policy a stored password was created under.
   password: z.string().min(1, 'Password is required').max(128),
@@ -104,6 +153,8 @@ export type VerifyEmailDto = z.infer<typeof verifyEmailSchema>;
 export interface AuthenticatedUserResponse {
   id: string;
   email: string;
+  /** Present for accounts created after the username field shipped; legacy accounts have null. */
+  username: string | null;
   fullName: string;
   role: Role;
   sellerKind: SellerKind | null;

@@ -8,6 +8,7 @@ import { PropertyFacts } from '@/components/property-facts';
 import { SaveButton } from '@/components/save-button';
 import { CompareToggle } from '@/components/compare-controls';
 import { serverApi } from '@/lib/server-api';
+import { jsonLdScript, realEstateListingLd } from '@/lib/structured-data';
 import {
   formatAge,
   formatArea,
@@ -84,6 +85,13 @@ export default async function ListingPage({ params }: PageProps) {
 
   return (
     <div className="mx-auto max-w-[76rem] px-5 py-6 sm:px-8">
+      {/* JSON-LD for Google rich results — price, address, images can render
+          straight in the SERP. Also carries the verification claim
+          (officer id + timestamp) as machine-readable data. */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: jsonLdScript(realEstateListingLd(listing)) }}
+      />
       <nav aria-label="Breadcrumb" className="mb-5 text-[0.875rem]">
         <Link href="/" className="text-muted transition-colors hover:text-ink">
           Homes

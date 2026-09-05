@@ -1,0 +1,689 @@
+OFFLINE OPERATIONS PLAYBOOK — SELLEASY24
+=========================================
+
+The tech phases (phases.txt) build the online product. This document covers
+everything that CANNOT be replaced by software — the humans, offices,
+licenses, and partnerships that turn "a listings site" into a full-stack
+operator like Square Yards or Housing.com.
+
+Read this alongside phases.txt. Where phases.txt says "partner with an escrow
+bank" or "verifier reviews documents," this file spells out how to actually
+set that up: who to hire, what it costs per month, what regulator to
+register with, and what SOP the team runs.
+
+Priorities are tagged:
+  [V1]  needed for launch / already exists in your product
+  [V2]  needed within 6 months of scale
+  [V3]  full-stack expansion (Azuro / Interior Company parity)
+
+
+TABLE OF CONTENTS
+------------------
+  1.  Verification Team
+  2.  Customer Support Desk
+  3.  Legal & Compliance Retainer
+  4.  Fraud Investigation Desk
+  5.  Site Visit Coordination
+  6.  Field Sales for Developers (B2B)
+  7.  Broker Partner Network
+  8.  Property Management Operations (Azuro-style)
+  9.  Interior Design Services (Interior Company-style)
+  10. Escrow & Banking Operations
+  11. Fractional Ownership Operations
+  12. Training & Certification Program
+  13. Office & Physical Infrastructure
+  14. Operations Dashboard Requirements
+  15. Cost Summary
+
+
+===============================================================================
+1. VERIFICATION TEAM                                                       [V1]
+===============================================================================
+
+PURPOSE
+  The single differentiator of SellEasy24 — a human officer compares every
+  seller's ownership documents against the listing before it goes public.
+
+TEAM STRUCTURE (Year 1, ~500 listings/month)
+  - 3 Verification Officers (full-time)
+      Salary: ₹35,000-55,000/month each
+      Qualification: LLB preferred, or 2+ years real estate paralegal experience
+      Familiarity with Telangana land records, sale deeds, encumbrance certs
+
+  - 1 Verification Lead / Reviewer
+      Salary: ₹60,000-90,000/month
+      Approves escalations, audits sample of approved listings for quality
+
+  - 1 Moderator (fraud reports + suspicious leads)
+      Salary: ₹40,000-60,000/month
+
+REGULATORY / LEGAL
+  - No specific license required for document review
+  - Officers may need NDA + confidentiality agreements
+  - Data protection compliance: DPDPA 2023 (India) requires clear policies
+    for handling personal information (Aadhaar, PAN, sale deeds)
+  - Recommend appointing a Data Protection Officer once staff > 10
+
+TOOLS / VENDORS
+  - Verification queue (built into SellEasy24 — apps/admin)
+  - TSRERA portal access (public)
+  - Telangana Registration & Stamps Dept. portal (public search)
+  - Karza / Signzy / Digio for automated title/EC pulls (₹50-200/query)
+  - Encrypted document storage (built — apps/api/src/common/storage)
+
+STANDARD OPERATING PROCEDURE
+  Step 1. Seller submits listing → status "PENDING_REVIEW"
+  Step 2. Officer picks from oldest-first queue
+  Step 3. Downloads uploaded documents (sale deed, tax receipt, EC)
+  Step 4. Cross-references:
+          - Owner name on deed matches seller account
+          - Property description matches listing (survey no., area, address)
+          - Encumbrance certificate < 6 months old
+          - For apartments: OC (Occupancy Certificate) present
+          - For projects: RERA number valid on TSRERA portal
+  Step 5. Records checklist result (each check pass/fail with note)
+  Step 6. Approves / requests revision / rejects with reason
+  Step 7. Lead reviews sample of 10% of approvals weekly
+
+SLA
+  Target: 24 hours for first review
+  Escalation: any listing pending >48h flagged to Verification Lead
+
+COST ESTIMATE (monthly)
+  Salaries: ₹2.5-3.5 lakh
+  Karza/Signzy API: ₹15,000-30,000 (300 lookups/month)
+  Total: ~₹3 lakh/month for 500 verified listings
+
+WHEN TO SCALE
+  Add 1 officer per 250 listings/month above baseline.
+
+
+===============================================================================
+2. CUSTOMER SUPPORT DESK                                                   [V1]
+===============================================================================
+
+PURPOSE
+  Handle buyer questions, listing disputes, and phone-related issues from
+  people who don't want to self-serve on the app.
+
+TEAM STRUCTURE (Year 1)
+  - 2 Support Agents
+      Salary: ₹22,000-32,000/month each
+      Shift coverage 9am-9pm (Hyderabad-only market allows single time zone)
+      Languages: English, Telugu, Hindi
+
+  - 1 Support Lead (part-time / player-coach)
+      Salary: ₹45,000-60,000/month
+
+TOOLS / VENDORS
+  - Ticketing: Freshdesk / Zoho Desk / Help Scout (₹800-2,500 per agent/month)
+  - Phone: Exotel / Knowlarity virtual number (₹2,500-5,000/month + per-min)
+  - WhatsApp Business API: Meta Cloud API (per-conversation pricing)
+  - Email: support@selleasy24.com
+
+CHANNELS
+  - In-app help center (self-serve FAQ) — build this
+  - Email: 24-hour response SLA
+  - Phone: 9am-9pm business hours
+  - WhatsApp: business hours + auto-responder off-hours
+  - Chatbot (Phase 4 tech deliverable) reduces load by ~40%
+
+COMMON TICKET CATEGORIES
+  - "Where is my saved listing?" (account issues)
+  - "Broker isn't responding" (lead escalation)
+  - "I want to report a fraud" (routes to Fraud Desk — see §4)
+  - "Site visit didn't happen" (visit coordination — see §5)
+  - "How do I list my property?" (self-serve enablement)
+
+COST ESTIMATE (monthly)
+  Salaries: ₹80,000-1,25,000
+  Tools: ₹15,000-25,000
+  Phone/WhatsApp: ₹10,000-30,000 (usage-dependent)
+  Total: ~₹1.5 lakh/month
+
+
+===============================================================================
+3. LEGAL & COMPLIANCE RETAINER                                             [V1]
+===============================================================================
+
+PURPOSE
+  Real estate is a lawsuit magnet. You need standing counsel before you
+  need them urgently.
+
+STRUCTURE (Year 1)
+  - Retainer arrangement with a Hyderabad property law firm
+      Cost: ₹40,000-80,000/month base retainer
+      Additional: per-matter fees for litigation
+
+  - Optional: In-house Legal Counsel (join at ~5,000 monthly listings)
+      Salary: ₹1.2-2.5 lakh/month
+
+FIRMS TO EVALUATE IN HYDERABAD
+  - AZB & Partners (large, expensive, senior work)
+  - Trilegal (large, real estate specialist)
+  - Sarvani Law Associates (mid-tier, property specialist)
+  - Local firms: JSA, Poovayya & Co
+  Get 3 quotes; expect ₹50-70k retainer for a mid-tier property specialist
+
+SCOPE OF WORK
+  - Terms of Service, Privacy Policy, Cookie Policy (annual review)
+  - DPDPA 2023 compliance advisory
+  - Standard document templates:
+      - Sale agreement template
+      - Rental agreement template
+      - Broker engagement letter
+      - Verification checklist legal review
+  - Consumer Protection Act complaint response
+  - RERA-related buyer disputes
+  - Data breach response plan
+
+CRITICAL FIRST-90-DAYS DELIVERABLES
+  [ ] ToS + Privacy Policy live on site
+  [ ] DPDPA registration filed (if applicable — check with counsel)
+  [ ] MSA (Master Service Agreement) template for developer partners
+  [ ] Fraud reporting workflow reviewed
+  [ ] Verification checklist reviewed for legal defensibility
+
+
+===============================================================================
+4. FRAUD INVESTIGATION DESK                                                [V1]
+===============================================================================
+
+PURPOSE
+  When a buyer/seller reports fraud, someone must investigate and act.
+  Cannot be automated — requires judgment.
+
+TEAM STRUCTURE
+  - Owned by the Moderator role (see §1) initially
+  - Grows to dedicated Fraud Analyst at ~1,000 monthly listings
+      Salary: ₹40,000-70,000/month
+      Background: paralegal / audit / risk experience
+
+REPORTING CHANNELS
+  - fraudreport@selleasy24.com (mailbox → creates ticket)
+  - In-app "Report this listing" button (already built)
+  - Phone hotline (piggybacks on Support Desk)
+
+SOP
+  Step 1. Report received → auto-acknowledgment within 1 hour
+  Step 2. Fraud Analyst opens investigation ticket within 24 hours
+  Step 3. Reviews:
+          - Listing documents & photos
+          - Communication logs with seller
+          - Verifier's original checklist
+          - Cross-check with RERA / registration records
+  Step 4. Actions available:
+          - Take down listing (immediate)
+          - Suspend seller account
+          - Escalate to Legal for cease-and-desist
+          - Escalate to police (if evidence of criminal fraud)
+  Step 5. Reporter notified of outcome within 48-72 hours
+
+LEGAL ESCALATION PATH
+  - Legal counsel (see §3) for cease-and-desist letters
+  - FIR filing at local police station (buyer/seller as complainant)
+  - Cyber cell for portal cloning / fake website reports
+
+INSURANCE
+  Consider Cyber Liability + E&O insurance from Year 1
+  Provider: ICICI Lombard / HDFC Ergo / Tata AIG
+  Cost: ₹1-3 lakh/year for ₹5 crore coverage
+
+
+===============================================================================
+5. SITE VISIT COORDINATION                                                 [V2]
+===============================================================================
+
+PURPOSE
+  When a buyer requests a site visit, someone must schedule with the seller,
+  confirm availability, and ideally send a rep along.
+
+CURRENT STATE
+  Buyers request visit → app notifies seller → they coordinate directly.
+  Works at low volume. Breaks at scale.
+
+TEAM STRUCTURE (at 200+ visits/month)
+  - 1-2 Visit Coordinators
+      Salary: ₹20,000-30,000/month
+      Skills: phone communication, calendar management
+
+  - Field Reps (optional — for the "with agent" model, deferred to V3)
+      Vehicle allowance: ₹5,000-8,000/month
+      Salary: ₹25,000-40,000/month + per-visit incentive
+
+TOOLS
+  - Visit calendar (build into seller dashboard — Phase 1 remaining item)
+  - Two-way SMS / WhatsApp reminders (Exotel, Meta Cloud API)
+  - Google Maps integration for reps' routing
+
+SOP (No-Agent Model)
+  Step 1. Buyer requests visit through app
+  Step 2. Coordinator confirms seller availability within 4 hours
+  Step 3. Confirmed slot pushed to both sides + WhatsApp reminder 24h prior
+  Step 4. Post-visit: coordinator collects feedback from both sides
+  Step 5. Fraud check: if buyer reports "seller never showed up" > 2x, seller
+          flagged to Moderator
+
+SOP (With-Agent Model — V3)
+  Rep meets buyer at property. Explains verification record on the spot.
+  Explains what to look for. Reports back to platform: buyer's serious interest
+  level, any red flags (property doesn't match listing, seller under duress).
+
+COST (No-Agent)
+  ~₹40,000-60,000/month for 200-400 monthly visits
+
+
+===============================================================================
+6. FIELD SALES FOR DEVELOPERS (B2B)                                        [V2]
+===============================================================================
+
+PURPOSE
+  New-construction projects (Builder role) don't sign up self-serve. Someone
+  has to pitch developers, negotiate marketing agreements, and onboard them.
+
+TEAM STRUCTURE
+  - 1 Sales Head (once you have 5+ target builders)
+      Salary: ₹1.5-3 lakh/month + variable
+      Background: prior real estate sales / builder relationships in Hyderabad
+
+  - 2-4 Sales Managers (add as pipeline grows)
+      Salary: ₹60,000-1.2 lakh/month + commission
+      Commission: 10-20% of first-year platform fee
+
+TARGET SEGMENT
+  - Hyderabad builders with 1-3 active projects
+    (large builders will not need you; go for mid-tier first)
+  - HMDA-approved residential project developers
+  - Builders currently listing on Housing.com / 99acres who want more traction
+
+MSA (Master Service Agreement) DELIVERABLES
+  - Standard MSA drafted by Legal (see §3)
+  - Rate card: listing fees, featured placement, lead delivery models
+  - SLA on lead delivery (e.g., "leads within 15 minutes of buyer enquiry")
+  - Data ownership + termination clauses
+
+WORKFLOW
+  Prospect → discovery call → project audit → MSA signed → onboarding
+  Onboarding: brand assets uploaded, RERA number verified, project pages live,
+              sales team trained on the lead-management dashboard
+
+CRM
+  Sell.do (Square Yards' own product), Zoho CRM, or HubSpot
+  Cost: ₹1,000-3,000 per user/month
+
+COST
+  Base team of 3 (1 head + 2 managers): ₹3-6 lakh/month
+  Break-even: ~10-15 active developer clients paying ₹30-50k/month
+
+
+===============================================================================
+7. BROKER PARTNER NETWORK                                                  [V2]
+===============================================================================
+
+PURPOSE
+  Independent brokers already have inventory. Signing them up multiplies your
+  listings 10-100x with no acquisition cost per unit.
+
+MODEL (Square Connect analog)
+  - Brokers register with RERA number (required by law under RERA 2016)
+  - They list properties on SellEasy24 alongside their own channel
+  - When their listing closes via SellEasy24, they get 60-70% of platform fee
+
+TEAM STRUCTURE
+  - 1 Broker Success Manager per 500 active brokers
+      Salary: ₹35,000-60,000/month
+
+REGULATORY
+  - All brokers MUST have TSRERA registration (₹25,000 registration fee, valid 5 yrs)
+  - SellEasy24 verifies RERA number before onboarding
+  - GST invoicing to broker required
+
+OUTREACH CHANNELS
+  - RERA broker directory (public)
+  - Physical outreach in high-density broker areas (Ameerpet, KPHB)
+  - Broker referral program: broker gets ₹500-1000 for each new broker joined
+
+TRAINING (see §12)
+  - 2-hour onboarding session on listing quality standards
+  - Certification for "SellEasy24 Verified Broker" badge
+  - Ongoing quarterly meetups (physical or webinar)
+
+TECH REQUIRED
+  - Broker portal (subset of Seller portal — mostly built)
+  - Bulk-listing upload (CSV / Excel import) — build in Phase 2 or 3
+  - Broker dashboard: leads received, revenue earned, listings performance
+  - Payout mechanism (bank transfers, monthly cycle)
+
+COST
+  Broker Success staff: ₹60k-2 lakh/month depending on scale
+  Payouts: variable (share of revenue, so self-funded)
+
+
+===============================================================================
+8. PROPERTY MANAGEMENT OPERATIONS (AZURO-STYLE)                            [V3]
+===============================================================================
+
+PURPOSE
+  Manage rental properties on behalf of landlords who don't want to deal with
+  tenants directly. Revenue: 5-10% of monthly rent + placement fees.
+
+NOTE: This is a separate business unit. Do not attempt before Verification
+      + Support + Fraud Desk are stable. Azuro took Square Yards years to
+      build; expect 12-18 months to reach 500 units under management.
+
+TEAM STRUCTURE (per 500 units)
+  - 1 Operations Head
+      Salary: ₹1.5-2.5 lakh/month
+
+  - 4-5 Relationship Managers (1 per 100-125 units)
+      Salary: ₹30,000-50,000/month
+      Handle tenant queries, rent collection escalation, small repairs
+
+  - 2-3 Field Executives
+      Salary: ₹22,000-32,000/month + travel allowance
+      Property inspections, key handovers, tenant onboarding
+
+  - 1 Accounts Executive
+      Salary: ₹35,000-55,000/month
+      Rent collection, security deposit management, TDS filings
+
+VENDORS / PARTNERS
+  - Rental agreement templates: Legal (§3)
+  - Payment collection: Razorpay Rental Payments / NoBrokerHOOD
+  - Maintenance: pre-negotiated rate cards with plumbers, electricians,
+    painters, carpenters
+  - Cleaning services (property turnover)
+  - Background check for tenants: Signzy / IDFY / Karza (₹200-500/check)
+
+REGULATORY
+  - Landlord signs Power of Attorney (limited scope) for tenant matters
+  - GST registration (mandatory over ₹20 lakh annual turnover)
+  - TDS on rent (10% if >₹50k/month) — collected and filed for landlord
+  - Rental agreements must be registered if lease >11 months
+    (registration fee: ~1% of annual rent + ₹500 stamp duty)
+
+SOP
+  Onboard → market for tenant → verify tenant → agreement → move-in →
+  monthly rent collection → maintenance handling → renewal / vacation
+
+COST
+  Operations team of 8-10: ₹6-10 lakh/month
+  Break-even: ~300 units at 8% average commission on ₹25k rent
+
+
+===============================================================================
+9. INTERIOR DESIGN SERVICES (INTERIOR COMPANY-STYLE)                       [V3]
+===============================================================================
+
+PURPOSE
+  Post-purchase upsell: kitchen, wardrobes, full home interiors.
+  Note: This is the highest-execution-risk vertical. Square Yards has 33%
+  complaint resolution rate on this line. Enter cautiously or NOT AT ALL.
+
+RECOMMENDED APPROACH: PARTNERSHIP, NOT IN-HOUSE
+  - Partner with 3-5 vetted local interior design firms
+  - Refer buyers to them
+  - Charge 8-12% referral fee
+  - Do NOT put SellEasy24 brand on the execution
+
+IF DOING IN-HOUSE (not recommended for years 1-3)
+  - Interior Design Head: ₹2-4 lakh/month
+  - 3-5 Designers: ₹40,000-80,000/month each
+  - Project managers, site supervisors, procurement
+  - Physical showroom (₹1-3 lakh/month rent in Kondapur/Kokapet)
+  - Warehouse for material
+  - Factory relationships or in-house carpentry
+  - Insurance: contractor's all-risk, professional indemnity
+
+Recommendation: SKIP or refer-only for first 3 years.
+
+
+===============================================================================
+10. ESCROW & BANKING OPERATIONS                                            [V2]
+===============================================================================
+
+PURPOSE
+  When a buyer pays a token amount or does a transaction through the
+  platform, the money must be held in escrow (not in SellEasy24's own
+  bank account — that creates massive regulatory risk).
+
+PARTNERS
+  - RazorpayX Escrow (SEBI-approved intermediary, developer-friendly APIs)
+  - ICICI Bank Escrow Services (larger transactions, more manual)
+  - HDFC Bank Escrow (similar)
+  - SBI Corporate Escrow (institutional)
+
+WORKFLOW
+  1. Buyer initiates token payment on app
+  2. Money flows into escrow account (not SellEasy24)
+  3. Milestones defined in agreement (e.g., deed registered → release)
+  4. Escrow bank releases funds per instructions from both parties
+  5. SellEasy24 receives its platform fee separately (invoice)
+
+TEAM REQUIRED
+  - Finance Executive: ₹40,000-70,000/month (reconciliation, escrow ops)
+  - CA on retainer: ₹15,000-40,000/month (audit, tax)
+
+REGULATORY
+  - PCI-DSS compliance (if you handle card data — Razorpay handles this for you)
+  - GST invoicing for platform fees
+  - Do NOT touch escrow funds directly — this is why the bank does it
+  - Bank KYC on every payer/payee
+
+TIMELINE TO SETUP
+  - RazorpayX Escrow: 4-6 weeks from application to going live
+  - Traditional bank: 3-6 months (banks are slow)
+
+COST
+  - RazorpayX: ₹10,000-25,000 setup + per-transaction fee (~₹15-30)
+  - Traditional bank: ₹50,000-2 lakh setup + monthly maintenance
+
+
+===============================================================================
+11. FRACTIONAL OWNERSHIP OPERATIONS                                        [V3]
+===============================================================================
+
+PURPOSE
+  Allow retail investors to buy fractions of commercial real estate.
+  Square Yards did this via SEBI SM REIT license (July 2025).
+
+REGULATORY (SEBI Small & Medium REIT)
+  - Apply for SM REIT license from SEBI
+  - Minimum AUM to register: ₹50 crore
+  - Sponsor requirement: net worth ≥ ₹20 crore
+  - Trustee must be SEBI-registered
+  - Manager entity must be SEBI-registered
+  - Custody arrangement required
+  - Timeline: 6-12 months from application to license
+
+TEAM
+  - Fund Manager: ₹3-8 lakh/month (SEBI-registered person)
+  - Compliance Officer: ₹1-2.5 lakh/month
+  - Investor Relations: ₹60,000-1.5 lakh/month
+  - CA + tax counsel + legal counsel
+
+Recommendation: DEFER TO YEAR 3+. Requires significant capital and legal
+setup. Not a natural extension of a listings marketplace.
+
+
+===============================================================================
+12. TRAINING & CERTIFICATION PROGRAM                                       [V2]
+===============================================================================
+
+PURPOSE
+  Verifiers, brokers, and sales staff need consistent training so listings
+  and interactions meet a uniform quality standard.
+
+VERIFIER TRAINING (for §1 team)
+  - Week 1: Telangana property law overview, sale deed anatomy, EC reading
+  - Week 2: RERA framework, HMDA approvals, common fraud patterns
+  - Week 3: Verification tool walk-through, mock cases with the Lead
+  - Week 4: Live queue under supervision
+  - Annual: 2-day refresher
+
+BROKER CERTIFICATION (for §7 network)
+  - Free 2-hour online course
+  - 20-question test → 80% required to pass
+  - "SellEasy24 Verified Broker" badge (shown on listings)
+  - Recertification annually
+
+CUSTOMER SUPPORT TRAINING (for §2)
+  - Product knowledge test
+  - Empathy / de-escalation training (external vendor)
+  - Fraud escalation SOP
+  - GDPR/DPDPA compliance in customer interactions
+
+DELIVERY OPTIONS
+  - In-house training team (from ~50+ staff)
+  - Freelance trainer network (initial 12 months)
+  - LMS platform: Docebo / TalentLMS (₹500-2000 per user/month)
+
+COST
+  In-house trainer: ₹80,000-1.5 lakh/month
+  Content development (one-time): ₹2-5 lakh per course
+
+
+===============================================================================
+13. OFFICE & PHYSICAL INFRASTRUCTURE                                       [V1]
+===============================================================================
+
+MINIMUM VIABLE OFFICE (Year 1)
+  Location: Hyderabad (Kondapur / Madhapur / Gachibowli)
+  Size: 1,500-2,500 sqft for 15-20 people
+  Rent: ₹80,000-2 lakh/month (Grade A commercial)
+  Deposit: 10-12 months' rent
+
+  OR
+
+  Co-working: WeWork / Awfis / 91Springboard
+  Cost: ₹8,000-15,000 per seat/month
+  Advantage: no deposit, scale up/down easily
+
+IT / EQUIPMENT
+  Laptops: ₹60,000-1 lakh each × headcount
+  Software licenses (per user/month):
+    - Microsoft 365: ₹750
+    - Slack: ₹350
+    - Zoom: ₹1,300
+    - Password manager (1Password): ₹400
+  Internet: primary + backup line ₹15,000/month
+  UPS / power backup: ₹50,000 upfront
+
+SECURITY (data)
+  - Endpoint device management (Jamf / Intune)
+  - VPN for verifiers accessing seller documents
+  - Access control system (biometric) for physical office
+  - Storage encryption (BitLocker / FileVault)
+
+
+===============================================================================
+14. OPERATIONS DASHBOARD REQUIREMENTS                                      [V1]
+===============================================================================
+
+The offline teams need real-time dashboards. Build these on the admin app
+(apps/admin — already exists in your codebase).
+
+DASHBOARDS NEEDED
+  - Verification queue: pending, in-review, approved today, SLA breaches
+  - Support queue: open tickets, response time SLA, satisfaction score
+  - Fraud desk: open investigations, closed this week, escalations
+  - Site visits: scheduled, completed, no-shows
+  - Broker performance: listings, leads, close rate per broker
+  - Developer sales pipeline: prospects, MSAs signed, MRR
+
+METRICS TO TRACK
+  - Verification turnaround (target: 24h median)
+  - Support first-response time (target: 4h)
+  - Fraud investigation cycle (target: 72h resolution)
+  - Broker onboarding time (target: 3 days)
+  - Developer MSA conversion (target: 20% of pitched)
+
+
+===============================================================================
+15. COST SUMMARY                                                          [ALL]
+===============================================================================
+
+YEAR 1 (V1 operations) — minimum viable offline
+  Verification team           ₹3.0 lakh/mo
+  Customer support            ₹1.5 lakh/mo
+  Legal retainer              ₹0.6 lakh/mo
+  Fraud desk (in Moderator)   included in verification
+  Office (co-working)         ₹1.5 lakh/mo (10-15 seats)
+  Tools / software            ₹0.5 lakh/mo
+  Insurance                   ₹0.3 lakh/mo (avg)
+                              ─────────────
+  TOTAL YEAR 1                ~₹7.4 lakh/month  (~₹90 lakh/year)
+
+YEAR 2 (V2 additions)
+  + Site visit coordination   ₹0.5 lakh/mo
+  + Field sales (developers)  ₹4.0 lakh/mo
+  + Broker network mgmt       ₹1.5 lakh/mo
+  + Escrow/finance ops        ₹1.0 lakh/mo
+  + Office (own space)        ₹1.5 lakh/mo (upgrade)
+  + Training / certification  ₹1.0 lakh/mo
+                              ─────────────
+  TOTAL YEAR 2                ~₹17 lakh/month   (~₹2 crore/year)
+
+YEAR 3 (V3 full-stack — if pursued)
+  + Property management ops   ₹10 lakh/mo (per 500 units)
+  + Fractional ownership      ₹15+ lakh/mo (with SEBI licensing)
+  + Interior services         SKIP or partner-only
+                              ─────────────
+  TOTAL YEAR 3                ~₹40+ lakh/month  (~₹5 crore/year)
+
+FOR CONTEXT
+  Square Yards: 8,000+ employees. Salaries alone ~₹500 crore/year.
+  You don't need their scale to win Hyderabad. Year 1 setup at ~₹90 lakh
+  covers the trust promise; Year 2 at ₹2 crore adds growth capacity.
+
+
+===============================================================================
+CRITICAL PATH FOR OFFLINE OPS (first 6 months)
+===============================================================================
+
+Month 1
+  [ ] Hire 1 Verification Officer + 1 Support Agent
+  [ ] Sign legal retainer with a Hyderabad property firm
+  [ ] Register RazorpayX Escrow application (long lead time)
+  [ ] Set up ticketing (Freshdesk) + phone (Exotel)
+  [ ] Deploy admin dashboard for verification queue (already exists)
+
+Month 2
+  [ ] Hire Verification Lead + 2nd Verification Officer
+  [ ] Draft & publish ToS, Privacy Policy, DPDPA compliance
+  [ ] Cyber liability insurance in place
+  [ ] Fraud SOP documented; fraudreport@ mailbox live
+
+Month 3
+  [ ] First fraud investigation resolved end-to-end (dry run)
+  [ ] Verification SLA (24h) hit for 90% of listings
+  [ ] Support SLA (4h first response) hit for 90% of tickets
+
+Month 4
+  [ ] Escrow live via RazorpayX
+  [ ] Site visit coordination workflow tested with 10 real visits
+
+Month 5
+  [ ] First 10 brokers onboarded with RERA verification
+  [ ] Broker training deck live
+
+Month 6
+  [ ] First developer MSA signed
+  [ ] Operations dashboard reviewed weekly by leadership
+  [ ] Year 2 hiring plan approved
+
+
+===============================================================================
+BOTTOM LINE
+===============================================================================
+
+Your online product (phases.txt) can ship without any of this. But the
+moment a real buyer transfers real money on your platform, you need:
+  1. A verification team that actually looked at the deed
+  2. A support desk that answers the phone
+  3. A legal counsel when it goes wrong
+  4. A fraud desk when someone reports it
+
+Everything else in this document is growth and expansion. Ship [V1] before
+you ship Phase 2. Ship Phases 1-3 before you build [V2]. Skip [V3] unless
+you have a specific customer pulling for it.

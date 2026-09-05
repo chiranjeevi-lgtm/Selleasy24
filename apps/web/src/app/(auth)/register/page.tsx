@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { signUp, type FormState } from '../actions';
 import {
@@ -26,6 +27,16 @@ export default function RegisterPage() {
   // registration number, and the API enforces that independently.
   const [role, setRole] = useState('BUYER');
 
+  // Referral code arrives from a shared link like /register?ref=ABCD1234.
+  // Normalised to uppercase + trimmed to match the alphabet the API expects.
+  // The server-side redemption is best-effort (invalid codes are swallowed),
+  // so what shows here is a pre-commit intent, not a promise.
+  const searchParams = useSearchParams();
+  const referralCode = (searchParams.get('ref') ?? '')
+    .trim()
+    .toUpperCase()
+    .slice(0, 16);
+
   const isSeller = role === 'OWNER' || role === 'BROKER';
 
   return (
@@ -38,8 +49,31 @@ export default function RegisterPage() {
         contacting us.
       </p>
 
+      {/* Referral pill — visible only when a `?ref=` param arrived. Sits
+          above the form so the user knows what they walked in with, and
+          the value round-trips through a hidden input so form submission
+          carries it. */}
+      {referralCode && (
+        <div className="mt-5 rounded-control border border-verify/40 bg-verify-soft px-4 py-3">
+          <p className="text-[0.8125rem] font-medium text-verify-ink">
+            Referral code applied
+          </p>
+          <p className="mt-0.5 text-[0.75rem] text-verify-ink/80">
+            <span className="tabular font-semibold">{referralCode}</span> — both of
+            you earn a reward once your account is verified.
+          </p>
+        </div>
+      )}
+
       <form action={action} className="mt-7 space-y-4">
         <FormError message={state.error} />
+
+        {/* Round-trip the referral code from the URL through form submission.
+            Empty when not present — the server action drops empty strings
+            before forwarding to the API. */}
+        {referralCode && (
+          <input type="hidden" name="referralCode" value={referralCode} />
+        )}
 
         <SelectInput
           name="role"
@@ -63,11 +97,25 @@ export default function RegisterPage() {
         />
 
         <TextInput
+          name="username"
+          label="Username"
+          type="text"
+          required
+          minLength={3}
+          maxLength={30}
+          pattern="[a-z0-9_]{3,30}"
+          autoComplete="username"
+          hint="3–30 characters. Lowercase letters, digits and underscore. You can sign in with this or your email."
+          error={state.fieldErrors?.username}
+        />
+
+        <TextInput
           name="email"
           label="Email"
           type="email"
           required
           autoComplete="email"
+          hint="Used for password reset and account emails."
           error={state.fieldErrors?.email}
         />
 

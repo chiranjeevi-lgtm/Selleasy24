@@ -21,13 +21,14 @@ export function LoginForm({ next }: { next: string }) {
       <FormError message={state.error} />
 
       <TextInput
-        name="email"
-        label="Email"
-        type="email"
+        name="identifier"
+        label="Email or username"
+        type="text"
         required
-        autoComplete="email"
+        autoComplete="username"
         autoFocus
-        error={state.fieldErrors?.email}
+        hint="Whichever you signed up with — both work."
+        error={state.fieldErrors?.identifier ?? state.fieldErrors?.email}
       />
 
       <TextInput

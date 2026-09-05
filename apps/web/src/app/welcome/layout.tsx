@@ -4,19 +4,48 @@ import { ApiError } from '@/lib/api';
 import { serverApi } from '@/lib/server-api';
 
 /**
- * Onboarding shell.
+ * Onboarding shell — buyers only.
  *
- * Narrow, quiet, and with no navigation out except "do this later" — a page
- * asking one short question should not also offer six places to go instead.
+ * The five welcome steps (phone → purpose → budget → areas → about) ask
+ * buyer-specific questions: what they want, their spending range, their
+ * monthly income, preferred localities. None of those apply to a seller
+ * listing a property or a field agent servicing owners.
+ *
+ * The signUp action already routes sellers to /seller/phone and builders
+ * to /seller/projects, but nothing was stopping a signed-in seller from
+ * *landing* on /welcome/* directly (bookmark, URL edit, back-button
+ * across sessions). This layout closes that door — any non-buyer role
+ * is bounced to their proper landing surface.
+ *
+ * Narrow, quiet, and with no navigation out except "do this later" — a
+ * page asking one short question should not also offer six places to
+ * go instead.
  */
 export default async function WelcomeLayout({ children }: { children: React.ReactNode }) {
+  let me;
   try {
-    await serverApi.me();
+    me = await serverApi.me();
   } catch (error) {
     if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
       redirect('/login?next=/welcome/phone');
     }
     throw error;
+  }
+
+  // Role guard — mirrors safeRedirectTarget in (auth)/actions.ts so a
+  // signed-in seller / builder / agent lands where they belong, not on
+  // a set of buyer-preference forms that don't apply to them.
+  if (me.role === 'OWNER' || me.role === 'BROKER') {
+    redirect('/seller/listings');
+  }
+  if (me.role === 'BUILDER') {
+    redirect('/seller/projects');
+  }
+  if (me.role === 'FIELD_AGENT' || me.role === 'AGENT_APPLICANT') {
+    redirect('/agent/status');
+  }
+  if (me.role === 'VERIFIER' || me.role === 'MODERATOR' || me.role === 'ADMIN' || me.role === 'SUPER_ADMIN') {
+    redirect('/');
   }
 
   return (

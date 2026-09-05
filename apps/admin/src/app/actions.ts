@@ -34,7 +34,10 @@ export async function signIn(_prev: ActionState, form: FormData): Promise<Action
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      email: String(form.get('email') ?? ''),
+      // Accept email or username; the API decides by presence of '@'.
+      identifier: String(form.get('identifier') ?? form.get('email') ?? '')
+        .trim()
+        .toLowerCase(),
       password: String(form.get('password') ?? ''),
     }),
     cache: 'no-store',

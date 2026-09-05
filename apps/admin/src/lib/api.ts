@@ -369,7 +369,103 @@ export const adminApi = {
   reports: () => authed<ReportItem[]>('/reports'),
   resolveReport: (id: string, payload: unknown) =>
     authed(`/reports/${id}/resolve`, { method: 'PATCH', body: JSON.stringify(payload) }),
+
+  // ---------------------------------------------------------------------------
+  // Field agent applications — Phase 2 addition
+  // ---------------------------------------------------------------------------
+
+  fieldAgentQueue: (status?: FieldAgentStatus) =>
+    authed<FieldAgentQueue>(
+      `/admin/field-agents${status ? `?status=${status}` : ''}`,
+    ),
+  activateFieldAgent: (id: string) =>
+    authed<{ id: string; status: FieldAgentStatus }>(
+      `/admin/field-agents/${id}/activate`,
+      { method: 'PATCH' },
+    ),
+  suspendFieldAgent: (id: string, reason: string) =>
+    authed<{ id: string; status: FieldAgentStatus }>(
+      `/admin/field-agents/${id}/suspend`,
+      { method: 'PATCH', body: JSON.stringify({ reason }) },
+    ),
+
+  // ---------------------------------------------------------------------------
+  // Enquiries (admin oversight of every lead across the platform)
+  // ---------------------------------------------------------------------------
+
+  allLeads: (params: { status?: LeadStatus; limit?: number; offset?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.status) qs.set('status', params.status);
+    if (params.limit !== undefined) qs.set('limit', String(params.limit));
+    if (params.offset !== undefined) qs.set('offset', String(params.offset));
+    const query = qs.toString();
+    return authed<AllLeadsResponse>(`/admin/leads${query ? `?${query}` : ''}`);
+  },
 };
+
+export type FieldAgentStatus = 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'INACTIVE';
+
+export interface FieldAgentEntry {
+  id: string;
+  userId: string | null;
+  fullName: string;
+  phone: string;
+  email: string;
+  experience: string;
+  serviceLocalities: string[];
+  notes: string | null;
+  status: FieldAgentStatus;
+  activatedAt: string | null;
+  suspendedAt: string | null;
+  suspendedReason: string | null;
+  ratingAverage: number | null;
+  ratingCount: number;
+  completedAssignments: number;
+  createdAt: string;
+}
+
+export interface FieldAgentQueue {
+  total: number;
+  limit: number;
+  offset: number;
+  items: FieldAgentEntry[];
+}
+
+export type LeadStatus = 'NEW' | 'CONTACTED' | 'QUALIFIED' | 'CLOSED_WON' | 'CLOSED_LOST';
+
+export interface AllLeadsEntry {
+  id: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  message: string | null;
+  status: LeadStatus;
+  contactedAt: string | null;
+  createdAt: string;
+  listing: {
+    id: string;
+    title: string;
+    seller: { id: string; fullName: string; email: string };
+  } | null;
+  project: {
+    id: string;
+    name: string;
+    builder: { id: string; fullName: string; email: string };
+  } | null;
+  projectUnit: {
+    id: string;
+    bedrooms: number;
+    areaSqft: number | null;
+    priceFrom: string | number;
+  } | null;
+}
+
+export interface AllLeadsResponse {
+  total: number;
+  limit: number;
+  offset: number;
+  items: AllLeadsEntry[];
+}
 
 /**
  * URL for a document, proxied through this app.

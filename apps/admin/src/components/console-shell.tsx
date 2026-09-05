@@ -7,7 +7,7 @@ import { signOut } from '@/app/actions';
  * The seal-red rule across the top is the same device the public endorsement uses
  * — here it marks the whole surface as the place verification decisions are made.
  */
-type Tab = 'dashboard' | 'queue' | 'projects' | 'reports';
+type Tab = 'dashboard' | 'queue' | 'projects' | 'reports' | 'field-agents' | 'leads';
 
 const TABS: ReadonlyArray<{ id: Tab; href: string; label: string }> = [
   { id: 'dashboard', href: '/dashboard', label: 'Dashboard' },
@@ -16,7 +16,15 @@ const TABS: ReadonlyArray<{ id: Tab; href: string; label: string }> = [
   // check different documents against different registers, and interleaving them
   // would mean switching context on every row.
   { id: 'projects', href: '/projects', label: 'Projects' },
+  // Every enquiry across the platform. Buyer contact appears here (behind
+  // admin auth) — the notification email admins receive is PII-free by
+  // design, and the full detail lives on this tab.
+  { id: 'leads', href: '/leads', label: 'Enquiries' },
   { id: 'reports', href: '/reports', label: 'Reports' },
+  // Field-agent applications are a separate lifecycle from listing verification
+  // — activation touches the User.role column, not just a listing status — so
+  // it deserves its own tab rather than a modal off the reports view.
+  { id: 'field-agents', href: '/field-agents', label: 'Field agents' },
 ];
 
 export function ConsoleShell({

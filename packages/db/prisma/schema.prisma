@@ -43,10 +43,36 @@ enum Role {
   /// than individual resale properties, and is legally required to hold a RERA
   /// project registration before advertising at all.
   BUILDER
+  /// SellEasy24-vetted field agent — visits properties, captures photos and
+  /// documents, and creates the listing on behalf of an owner who cannot or
+  /// will not list themselves. Set on User only after admin activates the
+  /// application; the pending state lives on FieldAgent.status.
+  FIELD_AGENT
+  /// Applicant to the field-agent programme. Has an account (created at
+  /// application time so the applicant can log back in to check status) but
+  /// no agent-specific permissions until admin activates → role upgrades to
+  /// FIELD_AGENT. Only capability: view own pending-application status page.
+  AGENT_APPLICANT
   VERIFIER
   MODERATOR
   ADMIN
   SUPER_ADMIN
+}
+
+/// Lifecycle of a FieldAgent application / active agent record.
+///
+/// PENDING → applicant submitted the form, awaiting admin review.
+/// ACTIVE  → admin activated; the user's Role is FIELD_AGENT and they can
+///           see the assistance queue.
+/// SUSPENDED → temporarily blocked (dispute pending, low rating). Retains
+///             the FieldAgent record and history; can be un-suspended.
+/// INACTIVE  → resigned or long-term suspended; not shown in the public
+///             agent directory.
+enum FieldAgentStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  INACTIVE
 }
 
 /// Residential only. Land, plots and commercial are explicitly out of scope.
@@ -55,6 +81,27 @@ enum PropertyType {
   HOUSE
   APARTMENT
   BUILDING
+}
+
+/// A listing is either a sale or a rental. Kept as an enum on Listing (not
+/// two models) because the property itself is the same asset — separating
+/// would mean duplicate rows for a home the owner is open to selling or
+/// renting. Rent-specific columns are nullable and only meaningful when
+/// kind = RENT.
+enum ListingKind {
+  SALE
+  RENT
+}
+
+/// Rental market conventions in India. Absentee owners routinely restrict
+/// to family-only or company-only; bachelors get filtered by gender in
+/// most metros. ANY means the owner has no preference.
+enum TenantPreference {
+  ANY
+  FAMILY
+  BACHELOR_MALE
+  BACHELOR_FEMALE
+  COMPANY
 }
 
 /// Furnishing, facing, possession and amenities exist as enums rather than free
@@ -339,12 +386,24 @@ enum ReportStatus {
 model User {
   id           String  @id @default(uuid()) @db.Uuid
   email        String  @unique
+  /// Alternative identifier for sign-in. New signups pick one alongside
+  /// their email; existing users are backfilled to null and continue to
+  /// sign in with email only. 3–30 chars, lowercased at write, unique.
+  username     String? @unique
   /// E.164. Optional at registration, required before a listing may be
   /// submitted for review.
   phone        String? @unique
   fullName     String
   /// argon2id. Never logged, never returned by any serializer.
   passwordHash String
+
+  /// Public officer identifier for VERIFIER accounts (e.g. "V-001").
+  /// Rendered on every listing card next to the verification recency
+  /// label ("verified 4h ago · V-001") so the check is attributable
+  /// rather than anonymous. Cross-Cutting Principle #4 — a defensible
+  /// marketing claim that Square Yards' passive badge cannot match.
+  /// Nullable for non-verifier accounts.
+  officerPublicId String? @unique @db.VarChar(10)
 
   role Role @default(BUYER)
 
@@ -384,10 +443,27 @@ model User {
   priceChanges           PriceHistory[]
   reportsFiled           ListingReport[]          @relation("ReporterReports")
   reportsResolved        ListingReport[]          @relation("ResolverReports")
+  localityReviews        LocalityReview[]         @relation("AuthorLocalityReviews")
+  moderatedLocalityReviews LocalityReview[]       @relation("ModeratorLocalityReviews")
+  syncedRegulatoryRegistrations RegulatoryRegistration[] @relation("RegulatorySyncedBy")
+  fieldAgentProfile      FieldAgent?              @relation("FieldAgentUser")
+  activatedFieldAgents   FieldAgent[]             @relation("FieldAgentActivator")
+  suspendedFieldAgents   FieldAgent[]             @relation("FieldAgentSuspender")
+  savedSearches          SavedSearch[]
+  referralCode           ReferralCode?
+  referralsMade          Referral[]               @relation("ReferralReferrer")
+  referralRedeemed       Referral?                @relation("ReferralReferred")
+  referralRewardsEarned  ReferralReward[]         @relation("RewardRecipient")
+  referralRewardsPaid    ReferralReward[]         @relation("RewardPaidBy")
   auditLogs              AuditLog[]
   refreshTokens          RefreshToken[]
   passwordResetTokens    PasswordResetToken[]
   emailVerificationToken EmailVerificationToken[]
+  // Written-commitment ledger relations. A user can appear on either side of
+  // a commitment (promisor / promisee) and can be the resolver on staff-side.
+  commitmentsMade        WrittenCommitment[] @relation("CommitmentPromisor")
+  commitmentsReceived    WrittenCommitment[] @relation("CommitmentPromisee")
+  commitmentsResolved    WrittenCommitment[] @relation("CommitmentResolver")
 
   @@index([role])
   @@index([isActive])
@@ -480,11 +556,413 @@ model Neighborhood {
   properties       Property[]
   projects         Project[]
   preferredByBuyers BuyerPreferredLocality[]
+  reviews          LocalityReview[]
+  snapshots        LocalitySnapshot[]
 
   @@unique([name, city, pincode])
   @@index([city])
   @@index([pincode])
   @@map("neighborhoods")
+}
+
+/// Regulatory registration records, keyed by the number issued by the
+/// authority (RERA in practice — the enum leaves room for HMDA and GHMC
+/// too). Populated by an automated sync (Phase 2 nightly job) and manually
+/// via the admin console. Verifiers cross-check every listing's declared
+/// registration number against this table; a mismatch or an expired
+/// registration is what turns the RERA verification check red.
+///
+/// This is REFERENCE data — one row per external registration, not per
+/// listing. The link to Listings and Projects is by matching the
+/// `registrationNumber` field to `Listing.reraNumber` (Phase 2 addition
+/// on Listing) or `Project.reraNumber` (already present).
+enum RegulatoryAuthority {
+  TSRERA
+  HMDA
+  GHMC
+}
+
+enum RegulatoryStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  UNDER_REVIEW
+  NOT_FOUND
+}
+
+model RegulatoryRegistration {
+  id                 String @id @default(uuid()) @db.Uuid
+  authority          RegulatoryAuthority @default(TSRERA)
+  registrationNumber String @unique
+
+  /// Everything below is captured from the source portal record.
+  projectName  String
+  promoterName String
+  towerPhases  String? @db.VarChar(500)
+  totalUnits   Int?
+
+  registeredOn DateTime  @db.Date
+  expiresOn    DateTime? @db.Date
+  status       RegulatoryStatus @default(ACTIVE)
+
+  /// Free-form field for anything the officer wants to note that isn't
+  /// structured — pending complaints, extension histories, etc.
+  approvalNotes String? @db.VarChar(1000)
+
+  /// Provenance. Set to the user who created or last synced this record;
+  /// null when the future nightly scraper wrote it.
+  syncedById String?  @db.Uuid
+  syncedAt   DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  syncedBy User? @relation("RegulatorySyncedBy", fields: [syncedById], references: [id])
+
+  @@index([status])
+  @@index([authority, status])
+  /// Lookup by registration number is the primary access pattern — the
+  /// unique constraint above covers this already.
+  @@map("regulatory_registrations")
+}
+
+/// Daily analytics snapshot for a locality — one row per locality per day.
+///
+/// Enables the price-trend charts on locality-overview pages and the
+/// insights dashboard (Feature 10) without recomputing over the entire
+/// listing history every request. Year-over-year appreciation is computed
+/// at read time by joining today's row against the snapshot from N years
+/// ago; nothing here needs a materialised view.
+///
+/// The `unique(neighborhoodId, snapshotDate)` constraint makes the daily
+/// job idempotent — running it twice on the same day updates rather than
+/// duplicates.
+model LocalitySnapshot {
+  id             String   @id @default(uuid()) @db.Uuid
+  neighborhoodId String   @db.Uuid
+  /// Date bucket. One row per locality per day, upserted on recompute.
+  snapshotDate   DateTime @db.Date
+
+  /// Median ₹/sqft across APPROVED + verified listings on this date.
+  /// Nullable when sample size is below the minimum threshold — a thin
+  /// locality with two listings shouldn't feed a "median" that swings
+  /// wildly on the next arrival.
+  medianPricePerSqft Decimal? @db.Decimal(12, 2)
+  /// Total APPROVED + verified listings visible on this date.
+  listingCount Int
+  /// Number of listings whose price/area fed the median calculation.
+  sampleSize Int
+  /// Average days between firstListedAt and (soldAt || now) — a velocity
+  /// signal. Nullable when there is nothing to average across.
+  avgDaysOnMarket Int?
+
+  createdAt DateTime @default(now())
+
+  neighborhood Neighborhood @relation(fields: [neighborhoodId], references: [id], onDelete: Cascade)
+
+  @@unique([neighborhoodId, snapshotDate])
+  @@index([neighborhoodId, snapshotDate])
+  @@index([snapshotDate])
+  @@map("locality_snapshots")
+}
+
+/// Locality UGC — residents review the neighbourhood, not any specific
+/// listing. Reviews go through moderation before appearing publicly because
+/// the whole point of an on-domain reviews surface is to keep trust
+/// conversation ours rather than Google's; that only works if the content
+/// is not garbage. One review per user per locality is a database
+/// constraint, not a runtime check, so a race between two POSTs cannot
+/// produce two reviews.
+enum LocalityReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// Saved search — a named URL-search-parameter snapshot a buyer wants to
+/// revisit or (once notifications ship) receive alerts against. Filters
+/// are stored as-is from the URL query string, which is the canonical form
+/// the search API already consumes — no parallel schema to keep in sync.
+///
+/// Alerts are a Phase 3 add: the model has `alertsEnabled` and
+/// `lastNotifiedAt` columns ready so the future cron only needs to add the
+/// send logic. Ships without them so the "save this search" flow can go
+/// live now.
+model SavedSearch {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+
+  /// Human-readable name the buyer gave the search. Defaults to a
+  /// generated summary when the buyer doesn't set one, so the list is
+  /// never a wall of "Search 1 / Search 2".
+  name String @db.VarChar(120)
+
+  /// Full URL query string that reproduces the search, e.g.
+  /// "neighborhoodId=abc&bedrooms=3&maxPrice=15000000". Kept as a string
+  /// rather than parsed into columns because the search API's parameter
+  /// set changes across phases — coupling the schema to the query shape
+  /// would need a migration every time we add a filter.
+  queryString String @db.VarChar(2000)
+
+  /// Notification opt-in. When true, the alerts cron includes this search
+  /// in its scan. False by default — an opt-in surface, not opt-out.
+  alertsEnabled Boolean @default(false)
+
+  /// Last time the alerts cron sent a notification for this search.
+  /// Used to dedupe so the same match doesn't notify twice.
+  lastNotifiedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  /// Cron-side query: only searches with alerts on, sorted by oldest
+  /// notification (fairness — newest doesn't jump the queue).
+  @@index([alertsEnabled, lastNotifiedAt])
+  @@map("saved_searches")
+}
+
+/// Referral code — one per user, auto-generated on first request. Used
+/// as the redemption key when a new signup enters a referral code. Kept
+/// separate from Referral so the "generate my code" flow can be
+/// idempotent (same user asking twice gets the same code back).
+model ReferralCode {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @unique @db.Uuid
+
+  /// 6–10 character alphanumeric code, uppercase. Case-insensitive on
+  /// redemption because typing a mixed-case code is friction the reward
+  /// doesn't justify.
+  code String @unique @db.VarChar(16)
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("referral_codes")
+}
+
+/// Referral instance — one row per (referrer, referred) pair, created
+/// when a new signup redeems a referral code. Referred user is unique on
+/// this table because a person can only be referred once; the referrer
+/// can appear many times.
+model Referral {
+  id           String @id @default(uuid()) @db.Uuid
+  referrerId   String @db.Uuid
+  referredId   String @unique @db.Uuid
+
+  /// The code used at redemption time. Kept even though it's derivable
+  /// from referrerId — future users may change codes and we still want
+  /// audit history for how each referral happened.
+  code String @db.VarChar(16)
+
+  /// Reward status. PENDING when just created; QUALIFIED once the
+  /// referred user completes a qualifying event (first verified listing
+  /// for OWNER/BROKER, first enquiry submitted for BUYER); PAID once the
+  /// referrer's reward has been credited/paid out.
+  ///
+  /// Status transitions correspond to ReferralReward rows: qualifying
+  /// creates two PENDING rewards (one for each side); admin flips reward
+  /// status to PAID separately, and Referral.status becomes PAID only
+  /// when both reward rows are PAID.
+  status ReferralStatus @default(PENDING)
+
+  /// Signup IP and user agent, captured at redemption time. Feeds the
+  /// admin fraud review — sock-puppet farming is detectable when the same
+  /// IP redeems the referrer's code multiple times. Nullable because the
+  /// redemption endpoint accepted requests before these were captured.
+  signupIp        String?
+  signupUserAgent String?
+
+  qualifiedAt DateTime?
+  paidAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  referrer User               @relation("ReferralReferrer", fields: [referrerId], references: [id])
+  referred User               @relation("ReferralReferred", fields: [referredId], references: [id], onDelete: Cascade)
+  rewards  ReferralReward[]
+
+  @@index([referrerId, status])
+  @@index([status, createdAt])
+  @@map("referrals")
+}
+
+/// Who gets the reward on a given referral row. Both sides earn — the
+/// referrer for making the introduction, the referred for the qualifying
+/// action they took. Two rewards per Referral, kept as separate rows so
+/// each can be paid, voided, or delayed independently (a fraud finding on
+/// one side shouldn't void the other's earned reward).
+enum RewardRecipientKind {
+  REFERRER
+  REFERRED
+}
+
+/// Reward lifecycle.
+///
+/// PENDING — created at qualification, awaiting admin review.
+/// PAID    — admin has confirmed disbursement (bank transfer, credit
+///           applied to future purchase, etc.). Admin records paymentNote.
+/// VOIDED  — admin found fraud, chargeback, or the referral is otherwise
+///           disqualified. Terminal.
+enum RewardStatus {
+  PENDING
+  PAID
+  VOIDED
+}
+
+/// One row per (referral, recipient side). Amount denormalised into the
+/// row rather than computed on read — reward values may change over time
+/// and a paid reward's amount must reflect the rate at qualification,
+/// not the current program rate.
+model ReferralReward {
+  id             String @id @default(uuid()) @db.Uuid
+  referralId     String @db.Uuid
+  recipientUserId String @db.Uuid
+  recipientKind  RewardRecipientKind
+
+  amountRupees Decimal @db.Decimal(10, 2)
+  status       RewardStatus @default(PENDING)
+
+  /// Set when admin flips to PAID or VOIDED. paymentNote carries the
+  /// transaction reference (bank UTR, credit application id) or the
+  /// void reason.
+  paidAt      DateTime?
+  paidById    String? @db.Uuid
+  paymentNote String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  referral      Referral @relation(fields: [referralId], references: [id], onDelete: Cascade)
+  recipient     User     @relation("RewardRecipient", fields: [recipientUserId], references: [id])
+  paidBy        User?    @relation("RewardPaidBy", fields: [paidById], references: [id])
+
+  // One reward per side per referral — enforces "REFERRER row exists at
+  // most once" and same for REFERRED. A duplicate is a coding bug.
+  @@unique([referralId, recipientKind])
+  @@index([recipientUserId, status])
+  @@index([status, createdAt])
+  @@map("referral_rewards")
+}
+
+enum ReferralStatus {
+  PENDING
+  QUALIFIED
+  PAID
+  VOIDED
+}
+
+/// SellEasy24 Field Agent — professional profile for a user who assists
+/// owners with the listing process. An owner who cannot or will not list
+/// their own property can request an agent; the agent visits the property,
+/// captures photos and documents, and submits the listing on the owner's
+/// behalf.
+///
+/// The record is created when an applicant submits the /become-an-agent
+/// form. It stays in PENDING until admin activates. On activation, the
+/// linked User.role is set to FIELD_AGENT (both are needed — status gates
+/// visibility, role gates route access).
+///
+/// userId is nullable because an application can come in from someone who
+/// does not yet have a SellEasy24 account. Admin either invites them to
+/// create one and links, or rejects the application.
+model FieldAgent {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String? @unique @db.Uuid
+
+  /// Denormalised so the admin queue can list applicants without joining
+  /// User (and so applications without a User yet still surface names).
+  fullName String  @db.VarChar(120)
+  phone    String  @db.VarChar(20)
+  email    String  @db.VarChar(255)
+
+  /// Enum-ish free text captured from the form: none / 1-2 / 3-5 / 5+
+  /// Not modelled as an enum because the values are display-only and the
+  /// applicant's own statement matters more than a rigid category.
+  experience String @db.VarChar(20)
+
+  /// Postgres text array of neighborhood names the agent can service.
+  /// String array rather than FK to neighborhoods deliberately — service
+  /// areas change over time and the admin should not need a migration to
+  /// add a new locality to the referenceable list.
+  serviceLocalities String[]
+
+  /// Free-form intro / anything else the applicant wanted to say.
+  notes String? @db.VarChar(1000)
+
+  status FieldAgentStatus @default(PENDING)
+
+  /// Admin action metadata.
+  activatedAt     DateTime?
+  activatedById   String?   @db.Uuid
+  suspendedAt     DateTime?
+  suspendedById   String?   @db.Uuid
+  suspendedReason String?   @db.VarChar(500)
+
+  /// Rating aggregate — recomputed when a new owner rates the agent.
+  ratingAverage Decimal? @db.Decimal(3, 2)
+  ratingCount   Int      @default(0)
+
+  /// Count of assignments completed successfully.
+  completedAssignments Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user        User? @relation("FieldAgentUser", fields: [userId], references: [id], onDelete: SetNull)
+  activatedBy User? @relation("FieldAgentActivator", fields: [activatedById], references: [id])
+  suspendedBy User? @relation("FieldAgentSuspender", fields: [suspendedById], references: [id])
+
+  /// Queue query: pending applications sorted by oldest first for FIFO
+  /// admin processing.
+  @@index([status, createdAt])
+  /// Directory query: only ACTIVE agents shown publicly.
+  @@index([status])
+  @@map("field_agents")
+}
+
+model LocalityReview {
+  id             String @id @default(uuid()) @db.Uuid
+  neighborhoodId String @db.Uuid
+  authorId       String @db.Uuid
+
+  /// 1–5, enforced by a CHECK constraint in the migration.
+  rating Int
+
+  /// Kept as separate short fields rather than one long text — a pros / cons
+  /// split renders as a scannable list on the locality page instead of a
+  /// wall of prose nobody reads.
+  pros String @db.VarChar(500)
+  cons String @db.VarChar(500)
+
+  /// Optional. Buyers weigh a "lived here 8 years" review differently from
+  /// "moved in last month" — surfaced next to the rating.
+  tenureYears Int?
+
+  status         LocalityReviewStatus @default(PENDING)
+  moderatedById  String?              @db.Uuid
+  moderatedAt    DateTime?
+  moderationNote String?              @db.VarChar(500)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  neighborhood Neighborhood @relation(fields: [neighborhoodId], references: [id], onDelete: Cascade)
+  author       User         @relation("AuthorLocalityReviews", fields: [authorId], references: [id], onDelete: Cascade)
+  moderatedBy  User?        @relation("ModeratorLocalityReviews", fields: [moderatedById], references: [id])
+
+  /// One review per user per locality. A user who changes their mind edits
+  /// their existing review rather than posting a new one.
+  @@unique([authorId, neighborhoodId])
+  /// Public list — the most common query, filters by locality + APPROVED.
+  @@index([neighborhoodId, status, createdAt])
+  /// Moderation queue — pending across the site, oldest first.
+  @@index([status, createdAt])
+  @@map("locality_reviews")
 }
 
 /// What a buyer told us they are looking for.
@@ -664,6 +1142,35 @@ model Listing {
 
   priceNegotiable Boolean @default(false)
 
+  /// SALE (default) or RENT. Rent listings render, filter and sort on
+  /// monthlyRent + deposit rather than `price`; the `price` field on a
+  /// rental is the notional asking price of the property (informational
+  /// only, never shown as the rent).
+  kind ListingKind @default(SALE)
+
+  /// Monthly rent in ₹. Required at API level when kind = RENT.
+  monthlyRent Decimal? @db.Decimal(10, 2)
+
+  /// Security deposit in "months of rent" — the unit Indian owners
+  /// quote in. 1/2/3/6/10 are common. Actual rupee amount = monthlyRent
+  /// × depositMonths; not denormalised because monthlyRent changes.
+  depositMonths Int?
+
+  /// Who the owner is willing to rent to (Indian rental market convention).
+  tenantPreference TenantPreference?
+
+  /// Rental extras — nullable when owner hasn't stated a policy.
+  petsAllowed         Boolean?
+  availableFrom       DateTime?
+  leaseDurationMonths Int?
+
+  /// Marketing signal — Square Yards' "Zero-Deposit Rentals" is the
+  /// direct parity. Owner marks the listing zero-brokerage; buyer can
+  /// filter on it. Only meaningful for rentals but kept unconditional
+  /// so it can be applied to sale listings too if we ever monetise
+  /// brokerage differently.
+  zeroBrokerage Boolean @default(false)
+
   /// Sits on the listing rather than the user: a seller may be happy to take
   /// calls about one property and want email only about another.
   contactPreference ContactPreference @default(ANY)
@@ -672,6 +1179,14 @@ model Listing {
 
   /// Denormalised from the latest approval so public queries stay single-table.
   isVerified Boolean @default(false)
+
+  /// 0-100 investment score, computed by ScoringService from RERA status,
+  /// locality trends, developer track record, infrastructure proximity,
+  /// amenities, price vs median, and photo/document completeness. Nullable
+  /// because a fresh listing has not been scored yet — scoring runs on
+  /// verification approval and via the nightly batch.
+  investmentScore            Int?
+  investmentScoreComputedAt  DateTime?
 
   /// IMMUTABLE. Set once when the listing first becomes publicly visible and
   /// never touched again — not on edit, not on re-approval, not on any bump.
@@ -851,6 +1366,13 @@ model Project {
   // --- Publication ---
   status     ProjectStatus @default(DRAFT)
   isVerified Boolean       @default(false)
+
+  /// Investment score 0-100, computed by ScoringService. Weighted heavier
+  /// toward RERA + builder track record on projects than on listings
+  /// (projects are pre-construction commitments, so delivery history is
+  /// the dominant risk signal).
+  investmentScore            Int?
+  investmentScoreComputedAt  DateTime?
 
   /// IMMUTABLE once set, exactly as on Listing. A project re-approved after an
   /// edit must not appear newly launched.
@@ -1338,4 +1860,128 @@ model AuditLog {
   @@index([actorId, createdAt])
   @@index([action, createdAt])
   @@map("audit_logs")
+}
+
+// ----------------------------------------------------------------------------
+// Written commitments — Cross-Cutting Principle #1 realised in the schema.
+//
+// Every discount, cashback, refund, callback, or service promise made on or
+// through SellEasy24 is recorded here as an append-only row before it takes
+// effect. Verbal promises are invalid by design; a Square Yards-style
+// "₹50,000 cashback" that never survives to writing has no record here and,
+// per policy, no standing.
+//
+// Append-only: correcting a commitment writes a new row and sets the old
+// row's `supersededById`. A "delete" is a `supersede` with reason. The
+// ledger is a legal instrument and the audit path must be reconstructible.
+//
+// Optional linkage: a commitment may attach to a listing (a price hold),
+// a lead (a callback promise made in an enquiry thread), or stand alone
+// (a service tier promise made at plan sign-up). All three fields nullable
+// so the row itself is the source of truth regardless of the surface that
+// created it.
+// ----------------------------------------------------------------------------
+
+/// Category of promise, driving both surface rendering and admin reporting.
+///
+/// DISCOUNT / CASHBACK / REFUND all carry a rupee `amount`; the others may
+/// be qualitative (a callback commitment doesn't have a rupee value). The
+/// enum is deliberately small — a wider taxonomy would push callers into
+/// picking the "least wrong" label instead of the exact one.
+enum CommitmentType {
+  DISCOUNT
+  CASHBACK
+  REFUND
+  CALLBACK
+  SERVICE_PROMISE
+  /// Owner or broker holds the asking price for a defined window while a
+  /// buyer completes finance / inspection.
+  PRICE_HOLD
+  OTHER
+}
+
+/// Lifecycle of a commitment. Append-only means transitioning between these
+/// is done by writing a new WrittenCommitment row that points back at the
+/// prior via `supersededById`, then the prior row's `status` is updated to
+/// SUPERSEDED. HONORED and DISPUTED are terminal.
+enum CommitmentStatus {
+  ACTIVE
+  HONORED
+  SUPERSEDED
+  EXPIRED
+  DISPUTED
+}
+
+model WrittenCommitment {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// Who made the promise (SellEasy24 staff account for platform promises;
+  /// an owner or broker for listing-level promises).
+  promisorId String @db.Uuid
+  /// Who the promise runs to (typically a buyer).
+  promiseeId String @db.Uuid
+
+  /// Optional attachment to the surface that generated the commitment.
+  /// A commitment can be listing-scoped (price hold), lead-scoped (callback
+  /// during enquiry), or free-standing (service tier promise at plan
+  /// signup). Only one of listingId / leadId is expected to be set, but
+  /// both nullable rather than a CHECK — the schema tolerates a commitment
+  /// that references both when that is truly the case (e.g. a price hold
+  /// attached to a specific enquiry).
+  listingId String? @db.Uuid
+  leadId    String? @db.Uuid
+
+  type   CommitmentType
+  status CommitmentStatus @default(ACTIVE)
+
+  /// The promise itself, written out in plain language for both parties
+  /// and the record. This is the text that appears on the signed PDF.
+  promiseText String
+
+  /// Rupee value when applicable (DISCOUNT / CASHBACK / REFUND). Null for
+  /// qualitative commitments so admin exposure totals aren't inflated by
+  /// non-monetary rows.
+  amountRupees Decimal? @db.Decimal(12, 2)
+
+  /// Object key of the signed PDF in the private documents bucket. Not
+  /// FK'd into the existing Document model — Documents are strongly bound
+  /// to a Listing (onDelete: Cascade), and commitments may outlive or
+  /// stand apart from any listing.
+  documentStorageKey String
+  /// SHA-256 of the signed PDF bytes at the time of signing. Any later
+  /// content mutation is detectable by rehashing and comparing.
+  documentHash       String  @db.Char(64)
+  documentSizeBytes  Int
+
+  /// When the promisor signed. Set at row insertion; not editable.
+  signedAt       DateTime  @default(now())
+  /// Optional acknowledgement by the promisee (a signed acceptance).
+  acknowledgedAt DateTime?
+  /// Optional expiry — a price hold typically expires in days.
+  expiresAt      DateTime?
+  /// Set when status flips to HONORED, DISPUTED, EXPIRED, or SUPERSEDED.
+  resolvedAt     DateTime?
+  /// Free text captured on resolution (dispute reason, honor notes).
+  resolutionNote String?
+  /// Which staff account resolved the commitment. Null for auto-expired.
+  resolvedById   String? @db.Uuid
+
+  /// Self-referential pointer set when a new commitment supersedes this one.
+  supersededById String? @db.Uuid @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  promisor   User               @relation("CommitmentPromisor", fields: [promisorId], references: [id])
+  promisee   User               @relation("CommitmentPromisee", fields: [promiseeId], references: [id])
+  resolvedBy User?              @relation("CommitmentResolver", fields: [resolvedById], references: [id])
+  supersededBy WrittenCommitment? @relation("CommitmentSuperseding", fields: [supersededById], references: [id])
+  supersedes   WrittenCommitment? @relation("CommitmentSuperseding")
+
+  @@index([promisorId, createdAt])
+  @@index([promiseeId, createdAt])
+  @@index([listingId])
+  @@index([leadId])
+  @@index([status, expiresAt])
+  @@map("written_commitments")
 }

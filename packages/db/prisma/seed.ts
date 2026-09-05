@@ -83,9 +83,16 @@ async function seedDevUsers(): Promise<void> {
     role: Role;
     sellerKind?: SellerKind;
     reraNumber?: string;
+    /** Public officer ID — only set on verifier accounts, shown next to the verification stamp on cards. */
+    officerPublicId?: string;
   }> = [
     { email: 'admin@kamalainfra.dev', fullName: 'Platform Admin', role: Role.ADMIN },
-    { email: 'verifier@kamalainfra.dev', fullName: 'Verification Officer', role: Role.VERIFIER },
+    {
+      email: 'verifier@kamalainfra.dev',
+      fullName: 'Verification Officer',
+      role: Role.VERIFIER,
+      officerPublicId: 'V-001',
+    },
     {
       email: 'owner@kamalainfra.dev',
       fullName: 'Test Owner',
@@ -117,13 +124,19 @@ async function seedDevUsers(): Promise<void> {
   for (const account of accounts) {
     await prisma.user.upsert({
       where: { email: account.email },
-      update: {},
+      // Update the officer ID even for existing rows so re-seeding
+      // backfills onto older dev databases without needing a fresh
+      // migration cycle.
+      update: {
+        officerPublicId: account.officerPublicId ?? null,
+      },
       create: {
         email: account.email,
         fullName: account.fullName,
         role: account.role,
         sellerKind: account.sellerKind ?? null,
         reraNumber: account.reraNumber ?? null,
+        officerPublicId: account.officerPublicId ?? null,
         passwordHash,
         // Pre-verified so development flows do not require an inbox.
         isEmailVerified: true,

@@ -32,7 +32,21 @@ function safeRedirectTarget(next: string | undefined, role: string): string {
   if (role === 'BUILDER') {
     return '/seller/projects';
   }
-  return role === 'OWNER' || role === 'BROKER' ? '/seller/listings' : '/';
+  if (role === 'OWNER' || role === 'BROKER') {
+    return '/seller/listings';
+  }
+  // Field agents and pending applicants land on their status page — it is
+  // the one surface that always tells them where their application stands
+  // (pending / active / suspended). The assignment dashboard is not yet
+  // built, so this stays canonical until that ships.
+  if (role === 'FIELD_AGENT' || role === 'AGENT_APPLICANT') {
+    return '/agent/status';
+  }
+  // Buyer (and anything else that reaches here) — profile hub.
+  if (role === 'BUYER') {
+    return '/profile';
+  }
+  return '/';
 }
 
 async function postAuth(path: string, payload: unknown): Promise<AuthResponse> {
@@ -79,7 +93,11 @@ export async function signIn(_prev: FormState, form: FormData): Promise<FormStat
   let result: AuthResponse;
   try {
     result = await postAuth('login', {
-      email: String(form.get('email') ?? ''),
+      // `identifier` accepts either the user's email or their username —
+      // the API decides by the presence of an '@'.
+      identifier: String(form.get('identifier') ?? '')
+        .trim()
+        .toLowerCase(),
       password: String(form.get('password') ?? ''),
     });
   } catch (error) {
@@ -100,16 +118,27 @@ export async function signUp(_prev: FormState, form: FormData): Promise<FormStat
   const role = String(form.get('role') ?? 'BUYER');
   const reraNumber = String(form.get('reraNumber') ?? '').trim();
   const phone = String(form.get('phone') ?? '').trim();
+  const username = String(form.get('username') ?? '')
+    .trim()
+    .toLowerCase();
+  // Referral code arrives as a hidden input on the register form, pre-filled
+  // by the page when `?ref=CODE` is present in the URL. Empty string → omit
+  // from the body so the API's optional field is genuinely absent (not
+  // "").  Any invalid code is silently swallowed server-side so the signup
+  // still succeeds — see AuthService.register.
+  const referralCode = String(form.get('referralCode') ?? '').trim().toUpperCase();
 
   let result: AuthResponse;
   try {
     result = await postAuth('register', {
-      email: String(form.get('email') ?? ''),
+      email: String(form.get('email') ?? '').trim().toLowerCase(),
+      username,
       password: String(form.get('password') ?? ''),
       fullName: String(form.get('fullName') ?? ''),
       role,
       ...(phone ? { phone } : {}),
       ...(reraNumber ? { reraNumber } : {}),
+      ...(referralCode ? { referralCode } : {}),
     });
   } catch (error) {
     if (error instanceof ApiError) {

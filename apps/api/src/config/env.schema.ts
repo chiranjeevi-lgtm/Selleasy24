@@ -128,6 +128,19 @@ export const envSchema = z.object({
   RESEND_API_KEY: z.string().default(''),
   EMAIL_FROM: z.string().min(1).default('SellEasy24 <no-reply@selleasy24.com>'),
   APP_PUBLIC_URL: z.string().url(),
+  /**
+   * Where to send admin-oversight notifications (new enquiries, new visit
+   * requests). Kept intentionally PII-free — the notification says WHAT
+   * happened on which listing, and links to the admin console for full
+   * detail behind admin authentication. Comma-separated for multiple
+   * recipients. Default matches the seeded admin account.
+   */
+  ADMIN_NOTIFICATIONS_EMAIL: z.string().min(1).default('admin@kamalainfra.dev'),
+  /**
+   * Absolute URL of the admin console. Used in admin-notification emails
+   * so the "view details" link resolves to the right host per env.
+   */
+  ADMIN_PUBLIC_URL: z.string().url().default('http://localhost:3001'),
 
   // --- Phone verification ---------------------------------------------------
 
@@ -139,7 +152,7 @@ export const envSchema = z.object({
    * below forbids it in production — a demo shortcut reaching production would
    * let anyone sign in as anyone.
    */
-  OTP_DELIVERY: z.enum(['console']).default('console'),
+  OTP_DELIVERY: z.enum(['console', 'whatsapp']).default('console'),
 
   /** Minutes a code stays valid. Short: it is a credential while it lives. */
   OTP_TTL_MINUTES: z.coerce.number().int().min(1).max(30).default(10),
@@ -150,12 +163,57 @@ export const envSchema = z.object({
    * does not close that, so the code itself has to expire on failure.
    */
   OTP_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
+
+  // --- WhatsApp Cloud API (Meta) --------------------------------------------
+  // Required only when OTP_DELIVERY = "whatsapp" — enforced by the refine
+  // below. Optional at the field level so local dev with the console driver
+  // doesn't need Meta credentials to boot.
+  //
+  // These come from the Meta Business Suite once the WhatsApp Business
+  // Account is provisioned:
+  //   PHONE_NUMBER_ID       — the Meta-assigned id (NOT the actual phone number)
+  //   BUSINESS_ACCOUNT_ID   — WABA id, useful for later template management
+  //   ACCESS_TOKEN          — permanent system-user token from Business Manager
+  //   APP_SECRET            — the Meta App's app secret; used to verify
+  //                            inbound webhook signatures (HMAC-SHA256)
+  //   WEBHOOK_VERIFY_TOKEN  — arbitrary shared secret you pick, echoed back
+  //                            during Meta's webhook subscription handshake
+  //   TEMPLATE_NAME         — approved authentication template name
+  //                            (recommended: selleasy24_login_otp)
+  //   TEMPLATE_LANGUAGE     — BCP-47 language tag matching the template
+  //                            (e.g. "en", "en_US", "te" for Telugu)
+  WHATSAPP_PHONE_NUMBER_ID: z.string().min(1).optional(),
+  WHATSAPP_BUSINESS_ACCOUNT_ID: z.string().min(1).optional(),
+  WHATSAPP_ACCESS_TOKEN: z.string().min(1).optional(),
+  WHATSAPP_APP_SECRET: z.string().min(1).optional(),
+  WHATSAPP_WEBHOOK_VERIFY_TOKEN: z.string().min(1).optional(),
+  WHATSAPP_TEMPLATE_NAME: z.string().min(1).optional(),
+  WHATSAPP_TEMPLATE_LANGUAGE: z.string().min(1).optional(),
 })
   .refine((env) => !(env.NODE_ENV === 'production' && env.OTP_DELIVERY === 'console'), {
     path: ['OTP_DELIVERY'],
     message:
       'OTP_DELIVERY="console" returns codes to the caller and must never run in production. Configure a real delivery provider.',
-  });
+  })
+  // Fail at boot if OTP_DELIVERY=whatsapp is selected without the credentials
+  // needed to actually send. Better here than at the first send attempt in
+  // production, which would surface as a user-visible failure at the exact
+  // moment they tried to sign in.
+  .refine(
+    (env) =>
+      env.OTP_DELIVERY !== 'whatsapp' ||
+      Boolean(
+        env.WHATSAPP_PHONE_NUMBER_ID &&
+          env.WHATSAPP_ACCESS_TOKEN &&
+          env.WHATSAPP_TEMPLATE_NAME &&
+          env.WHATSAPP_TEMPLATE_LANGUAGE,
+      ),
+    {
+      path: ['OTP_DELIVERY'],
+      message:
+        'OTP_DELIVERY="whatsapp" requires WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN, WHATSAPP_TEMPLATE_NAME, and WHATSAPP_TEMPLATE_LANGUAGE.',
+    },
+  );
 
 export type Env = z.infer<typeof envSchema>;
 

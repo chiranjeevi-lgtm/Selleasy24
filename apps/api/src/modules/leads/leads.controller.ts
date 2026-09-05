@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { ReportStatus, Role } from '@kamala/db';
+import { LeadStatus, ReportStatus, Role } from '@kamala/db';
 import type { Request } from 'express';
 
 import {
@@ -186,6 +186,30 @@ export class LeadsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.leads.updateLeadStatus(user.id, id, dto);
+  }
+
+  // -------------------------------------------------------------------------
+  // Admin — every enquiry across the platform (oversight)
+  // -------------------------------------------------------------------------
+
+  @Get('admin/leads')
+  @Roles(...MODERATION_ROLES)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Every enquiry across the platform',
+    description:
+      'Admin/moderator oversight. Includes buyer name, phone, email and message — the same detail sellers see for their own leads, but scoped to every listing. Ordered newest first.',
+  })
+  async allLeads(
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.leads.listAllLeads({
+      ...(status && status in LeadStatus && { status: LeadStatus[status as keyof typeof LeadStatus] }),
+      ...(limit && { limit: Number(limit) }),
+      ...(offset && { offset: Number(offset) }),
+    });
   }
 
   // -------------------------------------------------------------------------

@@ -11,6 +11,7 @@ import { Role, SellerKind, type User } from '@kamala/db';
 import { AuditAction, AuditService } from '../../common/audit/audit.service';
 import { MailService } from '../../common/mail/mail.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { ReferralsService } from '../referrals/referrals.service';
 import type { Env } from '../../config/env.schema';
 import type {
   AuthenticatedUserResponse,
@@ -21,8 +22,15 @@ import type {
 import { PasswordService } from './password.service';
 import { TokenService, type TokenPair } from './token.service';
 
-/** Failed attempts before an account is temporarily locked (PRD: 10). */
-const MAX_FAILED_ATTEMPTS = 10;
+/**
+ * Failed attempts before an account is temporarily locked (PRD: 10).
+ *
+ * Relaxed to effectively-unlimited in non-production so testers logging
+ * in as multiple seeded users don't accidentally lock the seed accounts
+ * they need for the next test. Production keeps the PRD's 10.
+ */
+const MAX_FAILED_ATTEMPTS =
+  process.env.NODE_ENV === 'production' ? 10 : Number.MAX_SAFE_INTEGER;
 const LOCKOUT_MINUTES = 15;
 
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -55,6 +63,7 @@ export class AuthService {
     private readonly audit: AuditService,
     private readonly mail: MailService,
     private readonly config: ConfigService<Env, true>,
+    private readonly referrals: ReferralsService,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -62,7 +71,7 @@ export class AuthService {
   // -------------------------------------------------------------------------
 
   async register(dto: RegisterDto, ctx: RequestContext): Promise<AuthResult> {
-    const existing = await this.prisma.user.findUnique({
+    const existingByEmail = await this.prisma.user.findUnique({
       where: { email: dto.email },
       select: { id: true },
     });
@@ -75,8 +84,38 @@ export class AuthService {
      * is a poor trade for a consumer marketplace. The paths where enumeration
      * actually matters, login and password reset, are both generic below.
      */
-    if (existing) {
+    if (existingByEmail) {
       throw new ConflictException('An account with that email already exists.');
+    }
+
+    const existingByUsername = await this.prisma.user.findUnique({
+      where: { username: dto.username },
+      select: { id: true },
+    });
+    if (existingByUsername) {
+      // Same enumeration trade-off as email above — usernames are public
+      // identifiers so their existence is not sensitive.
+      throw new ConflictException('That username is already taken.');
+    }
+
+    /**
+     * Phone uniqueness is a schema-level UNIQUE constraint. Checking it
+     * here — with a specific message — is what prevents Prisma's P2002
+     * from bubbling up to the global filter as the useless "That value
+     * is already in use". A common collision path: someone applied to
+     * be a field agent (which creates a User) and is now trying to
+     * register again with the same number on a fresh account.
+     */
+    if (dto.phone) {
+      const existingByPhone = await this.prisma.user.findUnique({
+        where: { phone: dto.phone },
+        select: { id: true },
+      });
+      if (existingByPhone) {
+        throw new ConflictException(
+          'That phone number is already in use on another account. Sign in with it, or use a different number.',
+        );
+      }
     }
 
     const passwordHash = await this.passwords.hash(dto.password);
@@ -92,6 +131,7 @@ export class AuthService {
     const user = await this.prisma.user.create({
       data: {
         email: dto.email,
+        username: dto.username,
         fullName: dto.fullName,
         phone: dto.phone ?? null,
         passwordHash,
@@ -113,6 +153,17 @@ export class AuthService {
       userAgent: ctx.userAgent ?? null,
     });
 
+    // Referral code redemption. Uses the "safe" variant — a bad or already-
+    // used code must never fail the signup itself; the account is created
+    // and the code is silently skipped. Signup IP + user agent flow through
+    // so admin can catch sock-puppet farming later.
+    if (dto.referralCode) {
+      await this.referrals.redeemSafely(user.id, dto.referralCode, {
+        ...(ctx.ip && { ip: ctx.ip }),
+        ...(ctx.userAgent && { userAgent: ctx.userAgent }),
+      });
+    }
+
     await this.sendEmailVerification(user);
 
     const pair = await this.tokens.issuePair(user, ctx.ip, ctx.userAgent);
@@ -124,7 +175,13 @@ export class AuthService {
   // -------------------------------------------------------------------------
 
   async login(dto: LoginDto, ctx: RequestContext): Promise<AuthResult> {
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    // Identifier is either an email (contains '@') or a username. The two
+    // columns cannot overlap because the register schema forbids '@' in
+    // usernames, so one lookup covers both cases.
+    const isEmail = dto.identifier.includes('@');
+    const user = await this.prisma.user.findUnique({
+      where: isEmail ? { email: dto.identifier } : { username: dto.identifier },
+    });
 
     /**
      * Unknown account: verify against a decoy hash anyway.
@@ -415,6 +472,7 @@ export class AuthService {
     return {
       id: user.id,
       email: user.email,
+      username: user.username,
       fullName: user.fullName,
       role: user.role,
       sellerKind: user.sellerKind,

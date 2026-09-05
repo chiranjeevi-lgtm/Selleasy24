@@ -2,7 +2,8 @@ import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import type { Env } from '../../config/env.schema';
-import { OtpDelivery, OtpDeliveryFactory } from './otp-delivery';
+import { OtpDelivery } from './otp-delivery';
+import { OtpDeliveryFactory } from './otp-delivery.factory';
 import { PhoneVerificationService } from './phone-verification.service';
 
 /**

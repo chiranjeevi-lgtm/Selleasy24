@@ -45,22 +45,37 @@ export default async function LoginPage({
         <LoginForm next={next ?? ''} />
       </div>
 
-      <div className="mt-7 space-y-2 border-t border-line pt-5 text-[0.8125rem]">
-        <p className="text-muted">
-          <Link href="/forgot-password" className="text-action hover:underline">
-            Forgot your password?
-          </Link>
+      <p className="mt-3 text-[0.8125rem]">
+        <Link href="/forgot-password" className="text-action hover:underline">
+          Forgot your password?
+        </Link>
+      </p>
+
+      {/*
+        Signup CTA sits directly under the primary sign-in action and is
+        styled as a secondary button, not a text link buried in a footer.
+        A visitor who lands here without an account should not have to
+        scan the page to find how to create one.
+      */}
+      <div className="mt-8 rounded-control border border-line bg-canvas-deep p-5">
+        <p className="text-[0.9375rem] font-semibold text-ink">
+          New to SellEasy24?
         </p>
-        <p className="text-muted">
-          New here?{' '}
-          <Link href="/register" className="text-action hover:underline">
-            Create an account
-          </Link>
+        <p className="mt-1 text-[0.8125rem] leading-relaxed text-muted">
+          Create an account to save homes, request site visits, list a
+          property, or apply to be a field agent.
         </p>
-        <p className="text-faint">
-          Five failed attempts locks sign-in for fifteen minutes.
-        </p>
+        <Link
+          href={`/register${next ? `?next=${encodeURIComponent(next)}` : ''}`}
+          className="mt-4 inline-block rounded-control border border-action bg-surface px-5 py-2.5 text-[0.9375rem] font-semibold text-action transition-colors hover:bg-action hover:text-white"
+        >
+          Create an account
+        </Link>
       </div>
+
+      <p className="mt-6 text-[0.75rem] text-faint">
+        Five failed attempts locks sign-in for fifteen minutes.
+      </p>
     </div>
   );
 }

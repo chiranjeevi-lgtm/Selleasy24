@@ -1,11 +1,23 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ApiError } from '@/lib/api';
-import { serverApi, type SellerStats } from '@/lib/server-api';
+import { serverApi } from '@/lib/server-api';
 import { formatArea, formatRupeesShort } from '@/lib/format';
 import { WrongAccount } from '../wrong-account';
+import { PerformanceViewsChart } from './views-chart';
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * Photo URLs come back relative from the API (e.g. `/uploads/xyz.jpg`).
+ * The browser sees them from the web app's own origin (:3000) and 404s
+ * — the file lives on the API (:4000). Prepending the API base fixes it,
+ * same helper the homepage and /saved use.
+ */
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+function photoUrl(url: string): string {
+  return url.startsWith('http') ? url : `${API_BASE}${url}`;
+}
 
 export const metadata: Metadata = { title: 'Performance' };
 
@@ -125,7 +137,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
             </p>
           )}
 
-          <ViewsChart daily={stats.daily} />
+          <PerformanceViewsChart daily={stats.daily} />
 
           <section className="mt-10" aria-labelledby="per-listing">
             <h2 id="per-listing" className="display text-[1.25rem] text-ink">
@@ -155,10 +167,26 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                     <tr key={item.id} className="border-b border-line last:border-none">
                       <td className="py-3 pr-4">
                         <Link href={`/seller/listings/${item.id}`} className="group flex items-center gap-3">
-                          <span className="h-11 w-14 shrink-0 overflow-hidden rounded-control bg-canvas-deep">
-                            {item.photo && (
+                          <span className="grid h-12 w-16 shrink-0 place-items-center overflow-hidden rounded-control bg-canvas-deep ring-1 ring-line">
+                            {item.photo ? (
                               /* eslint-disable-next-line @next/next/no-img-element */
-                              <img src={item.photo} alt="" className="h-full w-full object-cover" loading="lazy" />
+                              <img
+                                src={photoUrl(item.photo)}
+                                alt=""
+                                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.06]"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <svg viewBox="0 0 20 20" aria-hidden="true" className="h-5 w-5 text-faint">
+                                <path
+                                  d="M3 4h14v12H3z M3 13l4-4 4 4 3-3 3 3"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.5"
+                                  strokeLinejoin="round"
+                                />
+                                <circle cx="8" cy="8" r="1.2" fill="currentColor" />
+                              </svg>
                             )}
                           </span>
                           <span className="min-w-0">
@@ -224,61 +252,3 @@ function Stat({
   );
 }
 
-/**
- * Views per day.
- *
- * Plain scaled bars rather than a charting library: it is one series over at
- * most ninety points, and pulling in a dependency for that would cost more to
- * load than the whole page.
- */
-function ViewsChart({ daily }: { daily: SellerStats['daily'] }) {
-  const peak = Math.max(...daily.map((day) => day.views), 1);
-  const total = daily.reduce((sum, day) => sum + day.views, 0);
-
-  if (total === 0) {
-    return (
-      <p className="mt-8 rounded-card border border-dashed border-line px-5 py-8 text-center text-[0.875rem] text-muted">
-        No views recorded in this period yet.
-      </p>
-    );
-  }
-
-  return (
-    <section className="mt-8" aria-labelledby="views-chart">
-      <h2 id="views-chart" className="display text-[1.25rem] text-ink">
-        Views per day
-      </h2>
-
-      <div className="mt-4 rounded-card border border-line bg-surface px-5 py-5">
-        <div className="flex h-32 items-end gap-[3px]" role="img" aria-label={`${total} views over ${daily.length} days`}>
-          {daily.map((day) => (
-            <div
-              key={day.date}
-              className="group relative flex-1 rounded-t-[3px] bg-action/15 transition-colors hover:bg-action/35"
-              // A floor of 2% keeps zero-view days visible as a baseline rather
-              // than a gap, so the axis reads as continuous.
-              style={{ height: `${Math.max((day.views / peak) * 100, 2)}%` }}
-            >
-              <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-control bg-ink px-2 py-1 text-[0.6875rem] text-white group-hover:block">
-                {day.views} on {new Date(day.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
-              </span>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-2.5 flex justify-between text-[0.75rem] text-faint tabular">
-          <span>
-            {new Date(daily[0]!.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
-          </span>
-          <span>Peak {peak} in a day</span>
-          <span>
-            {new Date(daily[daily.length - 1]!.date).toLocaleDateString('en-IN', {
-              day: 'numeric',
-              month: 'short',
-            })}
-          </span>
-        </div>
-      </div>
-    </section>
-  );
-}

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="SellEasy24">
+  <title>SellEasy24</title>
+  <rect width="512" height="512" rx="96" fill="#16324f"/>
+  <path
+    d="M 112 264 L 256 136 L 400 264 L 400 408 L 112 408 Z"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="24"
+    stroke-linejoin="round"
+  />
+  <rect x="220" y="308" width="72" height="100" fill="#ffffff"/>
+  <circle cx="384" cy="140" r="60" fill="#c9a227"/>
+  <path
+    d="M 356 140 L 376 160 L 412 122"
+    fill="none"
+    stroke="#16324f"
+    stroke-width="14"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

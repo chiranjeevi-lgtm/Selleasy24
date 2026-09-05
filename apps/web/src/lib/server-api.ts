@@ -162,6 +162,8 @@ export interface SellerLead {
 export interface CurrentUser {
   id: string;
   email: string;
+  /** Present for accounts registered after the username field shipped; legacy accounts have null. */
+  username: string | null;
   fullName: string;
   role: string;
   sellerKind: string | null;
@@ -338,6 +340,57 @@ export const serverApi = {
     return authedRequest('/buyers/me/profile');
   },
 
+  // --- Saved searches ---
+
+  mySavedSearches(): Promise<{ items: SavedSearchEntry[] }> {
+    return authedRequest('/saved-searches/mine');
+  },
+
+  createSavedSearch(payload: {
+    name: string;
+    queryString: string;
+    alertsEnabled?: boolean;
+  }): Promise<SavedSearchEntry> {
+    return authedRequest('/saved-searches', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  deleteSavedSearch(id: string): Promise<{ deleted: true }> {
+    return authedRequest(`/saved-searches/${id}`, { method: 'DELETE' });
+  },
+
+  toggleSavedSearchAlerts(id: string, alertsEnabled: boolean): Promise<{ id: string; alertsEnabled: boolean }> {
+    return authedRequest(`/saved-searches/${id}/alerts`, {
+      method: 'PATCH',
+      body: JSON.stringify({ alertsEnabled }),
+    });
+  },
+
+  // --- Referrals ---
+
+  myReferralCode(): Promise<{ id: string; code: string; createdAt: string }> {
+    return authedRequest('/referrals/me/code', { method: 'POST' });
+  },
+
+  myReferrals(): Promise<MyReferralsResponse> {
+    return authedRequest('/referrals/mine');
+  },
+
+  redeemReferral(code: string): Promise<{ id: string; code: string; status: string; createdAt: string }> {
+    return authedRequest('/referrals/redeem', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  },
+
+  // --- Field agent ---
+
+  myFieldAgentProfile(): Promise<MyFieldAgentProfile | null> {
+    return authedRequest('/field-agents/me');
+  },
+
   saveBuyerPurpose(payload: unknown): Promise<BuyerProfile> {
     return authedRequest('/buyers/me/profile/purpose', {
       method: 'PUT',
@@ -449,6 +502,60 @@ export interface SiteVisit {
   listing: { id: string; title: string };
   /** Present on the seller's view only — this is the one place it appears. */
   buyer?: { fullName: string; phone: string | null; email: string };
+}
+
+export interface SavedSearchEntry {
+  id: string;
+  name: string;
+  queryString: string;
+  alertsEnabled: boolean;
+  lastNotifiedAt: string | null;
+  createdAt: string;
+}
+
+export interface MyReferralsResponse {
+  items: Array<{
+    id: string;
+    code: string;
+    status: 'PENDING' | 'QUALIFIED' | 'PAID' | 'VOIDED';
+    createdAt: string;
+    qualifiedAt: string | null;
+    paidAt: string | null;
+    referredFirstName: string;
+  }>;
+  counts: {
+    total: number;
+    pending: number;
+    qualified: number;
+    paid: number;
+  };
+  /**
+   * Rupee totals across every reward this user has earned — sums over rewards
+   * they received both as REFERRER (bring-in) and as REFERRED (they were the
+   * new signup) so a single figure represents "how much this program has
+   * earned me". Denominated in rupees, not paise, to match the display unit.
+   */
+  rewards: {
+    pendingRupees: number;
+    paidRupees: number;
+  };
+}
+
+export interface MyFieldAgentProfile {
+  id: string;
+  fullName: string;
+  phone: string;
+  email: string;
+  experience: string;
+  serviceLocalities: string[];
+  status: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'INACTIVE';
+  activatedAt: string | null;
+  suspendedAt: string | null;
+  suspendedReason: string | null;
+  ratingAverage: number | null;
+  ratingCount: number;
+  completedAssignments: number;
+  createdAt: string;
 }
 
 export interface BuyerProfile {

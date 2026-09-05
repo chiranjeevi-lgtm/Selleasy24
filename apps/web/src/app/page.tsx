@@ -3,8 +3,13 @@ import { api, type Locality, type SearchResult } from '@/lib/api';
 import { ListingCardItem } from '@/components/listing-card';
 import { Recommended, RecommendationsPrompt } from '@/components/recommended';
 import { AppliedFilters, FilterPanel } from '@/components/search-filters';
+import { InsightsDashboard } from '@/components/insights-dashboard';
+import { LocalityPicker } from '@/components/locality-picker';
 import { PropertyPicker } from '@/components/property-picker';
+import { SaveSearchForm } from '@/components/save-search-form';
+import { SortControls } from '@/components/sort-controls';
 import { serverApi } from '@/lib/server-api';
+import { jsonLdScript, siteLocalBusinessLd } from '@/lib/structured-data';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,20 +37,6 @@ function absolutePhotoUrl(url: string): string {
  */
 const selectClass =
   "w-full cursor-pointer appearance-none bg-transparent bg-[url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4.5 6 8.5 10 4.5' fill='none' stroke='%236b7078' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")] bg-[length:12px] bg-[right_center] bg-no-repeat pr-6 text-[0.9375rem] font-medium text-ink outline-none";
-
-function PinIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-verify">
-      <path
-        d="M8 14s5-4.5 5-8A5 5 0 0 0 3 6c0 3.5 5 8 5 8Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <circle cx="8" cy="6" r="1.8" fill="currentColor" />
-    </svg>
-  );
-}
 
 function RupeeIcon() {
   return (
@@ -120,22 +111,10 @@ function SearchBar({
         the same look without creating a clipping context.
       */}
       <div className="grid gap-px rounded-[10px] bg-line [&>*:first-child]:rounded-t-[10px] [&>*:last-child]:rounded-b-[10px] lg:grid-cols-[1.25fr_1.15fr_1fr_auto] lg:[&>*:first-child]:rounded-l-[10px] lg:[&>*:first-child]:rounded-tr-none lg:[&>*:last-child]:rounded-r-[10px] lg:[&>*:last-child]:rounded-bl-none">
-        <label className="bg-surface px-4 py-3">
-          <span className="label flex items-center gap-1.5 text-faint">
-            <PinIcon />
-            Locality
-          </span>
-          <select
-            name="neighborhoodId"
-            defaultValue={values.neighborhoodId ?? ''}
-            className={`${selectClass} mt-1`}
-          >
-            <option value="">Anywhere in Hyderabad</option>
-            {localities.map((l) => (
-              <option key={l.id} value={l.id}>{l.name}</option>
-            ))}
-          </select>
-        </label>
+        <LocalityPicker
+          localities={localities}
+          selectedIds={splitParam(values.neighborhoodId)}
+        />
 
         <PropertyPicker
           selectedTypes={splitParam(values.propertyType)}
@@ -223,10 +202,28 @@ const FILTER_KEYS = [
   'minFloor',
   'maxFloor',
   'maxAgeYears',
+  // `sort` is a control, not a filter — but it travels the same URL round-trip
+  // and the search DTO accepts it. Without this whitelist entry the sort chips
+  // navigate correctly but the API never receives the sort value, so results
+  // silently stay in the default order.
+  'sort',
+  // "Near me" — /nearby resolves the browser's geolocation and links here
+  // with these three params. The API filters by Haversine distance and
+  // auto-sorts closest-first when nearLat/nearLng are present.
+  'nearLat',
+  'nearLng',
+  'radiusKm',
 ] as const;
 
 /** Filters whose controls are checkbox groups, so several values can arrive. */
-const MULTI_VALUE_KEYS = new Set<string>(['amenities', 'propertyType', 'bedrooms']);
+const MULTI_VALUE_KEYS = new Set<string>([
+  'amenities',
+  'propertyType',
+  'bedrooms',
+  // Locality is now multi-select — repeated `neighborhoodId=` params arrive
+  // when the LocalityPicker submits its hidden inputs.
+  'neighborhoodId',
+]);
 
 export default async function HomePage({ searchParams }: PageProps) {
   const params = await searchParams;
@@ -261,7 +258,9 @@ export default async function HomePage({ searchParams }: PageProps) {
   ]);
 
   const isFiltered = Object.keys(values).length > 0;
-  const localityName = localities.find((l) => l.id === values.neighborhoodId)?.name;
+  // Multi-select — build an id→name lookup once so applied-filter chips can
+  // resolve each selected locality without another loop per chip.
+  const localityNames = Object.fromEntries(localities.map((l) => [l.id, l.name]));
 
   /*
    * Saved state for the whole grid in one request rather than one per card.
@@ -328,6 +327,13 @@ export default async function HomePage({ searchParams }: PageProps) {
 
   return (
     <div>
+      {/* RealEstateAgent JSON-LD — anchors the brand for a knowledge panel
+          on "selleasy24 hyderabad" searches. One tag, static content, no
+          per-request cost. */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: jsonLdScript(siteLocalBusinessLd()) }}
+      />
       {/*
         Photographic hero. Property is a visual product — the previous
         text-only opening read as a placeholder no matter how good the type was.
@@ -402,7 +408,7 @@ export default async function HomePage({ searchParams }: PageProps) {
             )}
           </form>
 
-          <AppliedFilters values={values} {...(localityName && { localityName })} />
+          <AppliedFilters values={values} localityNames={localityNames} />
         </div>
       </section>
 
@@ -425,6 +431,18 @@ export default async function HomePage({ searchParams }: PageProps) {
       {recommendations !== null &&
         !recommendations.personalised &&
         buyerProfile !== null && <RecommendationsPrompt />}
+
+      {/*
+        Property Price Insights — Feature 10 (Phase 2).
+
+        Sits between the recommendations strip and the locality tiles: it's
+        the same "orient the buyer to the market" purpose as tiles, but at
+        one level of abstraction higher (city-wide numbers rather than
+        specific areas). Client-side because it fetches from three live
+        endpoints; hidden on failure so a data blip never blocks the rest
+        of the homepage.
+      */}
+      <InsightsDashboard />
 
       {/*
         Locality tiles.
@@ -503,14 +521,18 @@ export default async function HomePage({ searchParams }: PageProps) {
             )}
           </div>
 
-          {isFiltered && (
-            <Link
-              href="/"
-              className="rounded-control border border-line px-4 py-2 text-[0.875rem] font-medium text-ink transition-colors hover:bg-canvas-deep"
-            >
-              Clear filters
-            </Link>
-          )}
+          <div className="flex flex-wrap items-center gap-3">
+            {results.items.length > 0 && <SortControls values={values} />}
+            {isFiltered && <SaveSearchForm values={values} />}
+            {isFiltered && (
+              <Link
+                href="/"
+                className="rounded-control border border-line px-4 py-2 text-[0.875rem] font-medium text-ink transition-colors hover:bg-canvas-deep"
+              >
+                Clear filters
+              </Link>
+            )}
+          </div>
         </div>
 
         {results.items.length === 0 ? (

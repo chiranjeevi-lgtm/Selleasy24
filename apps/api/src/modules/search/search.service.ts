@@ -50,9 +50,18 @@ export class SearchService {
    * `listings_public_recent_idx` uses the same predicate.
    */
   async search(query: SearchQueryDto) {
+    // Default to SALE at the service layer rather than the DTO — an
+    // absent `kind` on `?ownersOnly=true` still means SALE inventory,
+    // and an /rent surface passes `kind=RENT` explicitly.
+    const kind = query.kind ?? 'SALE';
+
     const conditions: Prisma.Sql[] = [
       // Visibility — must always be first and must never be optional.
       Prisma.sql`l."status" = 'APPROVED'::"ListingStatus" AND l."isVerified" = true`,
+      // Kind partition — a sale search must never return rentals and vice
+      // versa. This is what makes the shared /?filter path safe to reuse
+      // for /rent without changing every downstream card.
+      Prisma.sql`l."kind" = ${kind}::"ListingKind"`,
     ];
 
     if (query.q) {
@@ -63,8 +72,12 @@ export class SearchService {
     if (query.city) {
       conditions.push(Prisma.sql`n."city" ILIKE ${query.city}`);
     }
-    if (query.neighborhoodId) {
-      conditions.push(Prisma.sql`p."neighborhoodId" = ${query.neighborhoodId}::uuid`);
+    if (query.neighborhoodId && query.neighborhoodId.length > 0) {
+      // ANY() so any number of localities travels as one bound array
+      // parameter and still uses the neighborhoodId index — no OR chain.
+      conditions.push(
+        Prisma.sql`p."neighborhoodId" = ANY(${query.neighborhoodId}::uuid[])`,
+      );
     }
     if (query.pincode) {
       conditions.push(Prisma.sql`p."pincode" = ${query.pincode}`);
@@ -135,6 +148,30 @@ export class SearchService {
       conditions.push(Prisma.sql`p."floor" <= ${query.maxFloor}`);
     }
 
+    // --- Distance filter ("homes near me") ---
+    // DTO refines guarantee nearLat and nearLng travel together, and that
+    // distanceAsc is only permitted when they are present — so a single
+    // `nearLat !== undefined` check is enough to gate both the WHERE clause
+    // and the ORDER BY below.
+    if (query.nearLat !== undefined && query.nearLng !== undefined) {
+      // Haversine, km. Listings with no latitude/longitude cannot honestly
+      // participate in a distance filter, so exclude them explicitly rather
+      // than treating NULL as (0, 0) at the equator.
+      const radiusKm = query.radiusKm ?? 5;
+      conditions.push(
+        Prisma.sql`p."latitude" IS NOT NULL AND p."longitude" IS NOT NULL`,
+      );
+      conditions.push(
+        Prisma.sql`(
+          6371 * acos(
+            cos(radians(${query.nearLat})) * cos(radians(p."latitude"::float8)) *
+            cos(radians(p."longitude"::float8) - radians(${query.nearLng})) +
+            sin(radians(${query.nearLat})) * sin(radians(p."latitude"::float8))
+          )
+        ) <= ${radiusKm}`,
+      );
+    }
+
     if (query.maxAgeYears !== undefined) {
       /*
        * Compared against the current year at query time rather than a stored
@@ -144,6 +181,39 @@ export class SearchService {
        */
       const earliestYear = new Date().getUTCFullYear() - query.maxAgeYears;
       conditions.push(Prisma.sql`p."yearBuilt" IS NOT NULL AND p."yearBuilt" >= ${earliestYear}`);
+    }
+
+    // --- Rent-specific filters (only meaningful when kind = RENT) ---
+    if (kind === 'RENT') {
+      if (query.minRent !== undefined) {
+        conditions.push(Prisma.sql`l."monthlyRent" >= ${query.minRent}`);
+      }
+      if (query.maxRent !== undefined) {
+        conditions.push(Prisma.sql`l."monthlyRent" <= ${query.maxRent}`);
+      }
+      if (query.maxDepositMonths !== undefined) {
+        conditions.push(Prisma.sql`l."depositMonths" IS NOT NULL AND l."depositMonths" <= ${query.maxDepositMonths}`);
+      }
+      if (query.tenantPreference) {
+        // ANY includes everyone, so a tenant filter for a specific bucket
+        // matches both that bucket and listings marked ANY.
+        conditions.push(
+          Prisma.sql`(l."tenantPreference" = ${query.tenantPreference}::"TenantPreference" OR l."tenantPreference" = 'ANY'::"TenantPreference")`,
+        );
+      }
+      if (query.petsAllowed !== undefined) {
+        conditions.push(Prisma.sql`l."petsAllowed" = ${query.petsAllowed}`);
+      }
+      if (query.availableFrom !== undefined) {
+        // A listing with no availableFrom is treated as available now.
+        conditions.push(
+          Prisma.sql`(l."availableFrom" IS NULL OR l."availableFrom" <= ${query.availableFrom})`,
+        );
+      }
+    }
+
+    if (query.zeroBrokerage) {
+      conditions.push(Prisma.sql`l."zeroBrokerage" = true`);
     }
 
     const where = Prisma.join(conditions, ' AND ');
@@ -197,14 +267,39 @@ export class SearchService {
         return Prisma.sql`l."price" ASC NULLS LAST`;
       case 'priceDesc':
         return Prisma.sql`l."price" DESC NULLS LAST`;
+      case 'rentAsc':
+        return Prisma.sql`l."monthlyRent" ASC NULLS LAST`;
+      case 'rentDesc':
+        return Prisma.sql`l."monthlyRent" DESC NULLS LAST`;
       case 'areaDesc':
         return Prisma.sql`p."areaSqft" DESC NULLS LAST`;
+      case 'distanceAsc':
+        // DTO refine guarantees both coords are present here.
+        return Prisma.sql`(
+          6371 * acos(
+            cos(radians(${query.nearLat ?? 0})) * cos(radians(p."latitude"::float8)) *
+            cos(radians(p."longitude"::float8) - radians(${query.nearLng ?? 0})) +
+            sin(radians(${query.nearLat ?? 0})) * sin(radians(p."latitude"::float8))
+          )
+        ) ASC`;
       case 'relevance':
         // q is guaranteed present when sort is relevance (enforced in the DTO).
         return Prisma.sql`ts_rank(to_tsvector('english', l."title" || ' ' || l."description"), plainto_tsquery('english', ${query.q ?? ''})) DESC, l."firstListedAt" DESC NULLS LAST`;
       case 'newest':
       default:
         // firstListedAt, never createdAt or updatedAt — the honest listing date.
+        // When a near-me filter is active, closest-first is nearly always what
+        // the buyer meant — auto-promote unless they explicitly asked for a
+        // different sort (in which case query.sort wouldn't be 'newest').
+        if (query.nearLat !== undefined && query.nearLng !== undefined) {
+          return Prisma.sql`(
+            6371 * acos(
+              cos(radians(${query.nearLat})) * cos(radians(p."latitude"::float8)) *
+              cos(radians(p."longitude"::float8) - radians(${query.nearLng})) +
+              sin(radians(${query.nearLat})) * sin(radians(p."latitude"::float8))
+            )
+          ) ASC`;
+        }
         return Prisma.sql`l."firstListedAt" DESC NULLS LAST`;
     }
   }
@@ -540,6 +635,14 @@ export class SearchService {
     lastConfirmedAt: Date | null;
     verifiedAt: Date | null;
     viewsCount: number;
+    kind: string;
+    monthlyRent: Prisma.Decimal | null;
+    depositMonths: number | null;
+    tenantPreference: string | null;
+    petsAllowed: boolean | null;
+    availableFrom: Date | null;
+    leaseDurationMonths: number | null;
+    zeroBrokerage: boolean;
     property: {
       id: string;
       address: string;
@@ -553,6 +656,7 @@ export class SearchService {
     };
     photos: Array<{ id: string; storageKey: string; sortOrder: number }>;
     seller: { id: string; fullName: string; sellerKind: string | null };
+    verifiedBy: { officerPublicId: string | null } | null;
   }) {
     return {
       id: listing.id,
@@ -562,6 +666,21 @@ export class SearchService {
       pricePerSqft: this.pricePerSqft(listing.price, listing.property.areaSqft),
       isVerified: listing.isVerified,
       verifiedAt: listing.verifiedAt,
+      /**
+       * Public officer ID of the verifier (Cross-Cutting Principle #4).
+       * Null if the listing is not yet verified, or if it was verified by
+       * an older account that predates the officerPublicId column.
+       */
+      verifiedByOfficer: listing.verifiedBy?.officerPublicId ?? null,
+      // Rent parity — SALE cards ignore these (all null except kind).
+      kind: listing.kind,
+      monthlyRent: listing.monthlyRent === null ? null : Number(listing.monthlyRent),
+      depositMonths: listing.depositMonths,
+      tenantPreference: listing.tenantPreference,
+      petsAllowed: listing.petsAllowed,
+      availableFrom: listing.availableFrom,
+      leaseDurationMonths: listing.leaseDurationMonths,
+      zeroBrokerage: listing.zeroBrokerage,
       /** Immutable first-publication date — the honest "listed N days ago". */
       firstListedAt: listing.firstListedAt,
       lastConfirmedAt: listing.lastConfirmedAt,

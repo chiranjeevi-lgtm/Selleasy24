@@ -138,14 +138,14 @@ describe('account recovery', () => {
 
       await http()
         .post('/api/auth/login')
-        .send({ email: user.email, password: NEW_PASSWORD })
+        .send({ identifier: user.email, password: NEW_PASSWORD })
         .expect(200);
 
       await resetRateLimits();
 
       await http()
         .post('/api/auth/login')
-        .send({ email: user.email, password: TEST_PASSWORD })
+        .send({ identifier: user.email, password: TEST_PASSWORD })
         .expect(401);
     });
 
@@ -158,7 +158,7 @@ describe('account recovery', () => {
 
       const login = await http()
         .post('/api/auth/login')
-        .send({ email: user.email, password: TEST_PASSWORD })
+        .send({ identifier: user.email, password: TEST_PASSWORD })
         .expect(200);
       const refreshToken = login.body.refreshToken;
 
@@ -235,7 +235,7 @@ describe('account recovery', () => {
 
       await http()
         .post('/api/auth/login')
-        .send({ email: user.email, password: NEW_PASSWORD })
+        .send({ identifier: user.email, password: NEW_PASSWORD })
         .expect(200);
     });
 
@@ -301,6 +301,7 @@ describe('account recovery', () => {
         .post('/api/auth/register')
         .send({
           email: 'confirms-on-register@selleasy24.test',
+          username: 'confirms_on_register',
           password: 'RegisterPassword123!',
           fullName: 'Registers Once',
           role: Role.BUYER,

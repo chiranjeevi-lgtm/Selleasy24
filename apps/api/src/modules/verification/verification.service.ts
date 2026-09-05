@@ -22,6 +22,7 @@ import type { Env } from '../../config/env.schema';
 import type { RequestContext } from '../auth/auth.service';
 import { DocumentsService, type DocumentContent } from '../listings/documents.service';
 import { ProjectDocumentsService } from '../projects/project-documents.service';
+import { ReferralsService } from '../referrals/referrals.service';
 import {
   CHECK_LABELS,
   mandatoryChecksForStage,
@@ -43,6 +44,7 @@ export class VerificationService {
     private readonly audit: AuditService,
     private readonly mail: MailService,
     private readonly config: ConfigService<Env, true>,
+    private readonly referrals: ReferralsService,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -312,6 +314,23 @@ export class VerificationService {
     // not roll back a completed verification decision.
     await this.documents.scheduleRetention(listingId);
     await this.notifySeller(listing.seller, listing.title, dto, listingId);
+
+    // Referral seller-side qualification, fired on first approval only. The
+    // service is idempotent — calling it on a re-approval of an already
+    // approved listing (or a seller with no referral) is a no-op. Wrapped in
+    // its own try/catch so a referral quirk cannot roll back a completed
+    // verification decision.
+    if (approved && listing.firstListedAt === null) {
+      try {
+        await this.referrals.qualifyForSeller(listing.sellerId);
+      } catch (error) {
+        // Verification is the load-bearing action here; referral qualification
+        // sits alongside it. Log and continue.
+        const detail = error instanceof Error ? error.message : String(error);
+        // eslint-disable-next-line no-console
+        console.warn(`Referral qualifyForSeller failed for ${listing.sellerId}: ${detail}`);
+      }
+    }
 
     return result;
   }

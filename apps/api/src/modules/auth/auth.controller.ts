@@ -99,9 +99,22 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  // 5 attempts per 15 minutes per IP, per the PRD. Overrides the global bucket
-  // for this handler only — a stricter limit here must not leak onto other routes.
-  @Throttle({ default: { ttl: 900_000, limit: 5 } })
+  /**
+   * 5 attempts per 15 minutes per IP in production (per the PRD). In
+   * non-production the limit is relaxed to 10,000 per window so heavy
+   * dev/test flows — logging in as multiple seeded users, rapid regress
+   * cycles — don't lock the tester out. NODE_ENV is read at module load
+   * time, so this branches once at API startup, not per-request.
+   *
+   * Overrides the global bucket for this handler only — a stricter (or
+   * looser) limit here must not leak onto other routes.
+   */
+  @Throttle({
+    default: {
+      ttl: 900_000,
+      limit: process.env.NODE_ENV === 'production' ? 5 : 10_000,
+    },
+  })
   @ApiOperation({ summary: 'Sign in with email and password' })
   async login(
     @Body(new ZodValidationPipe(loginSchema)) dto: LoginDto,
@@ -190,6 +203,7 @@ export class AuthController {
       select: {
         id: true,
         email: true,
+        username: true,
         fullName: true,
         role: true,
         sellerKind: true,

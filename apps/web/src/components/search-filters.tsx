@@ -225,10 +225,15 @@ export function FilterPanel({ values }: { values: FilterValues }) {
  */
 export function AppliedFilters({
   values,
-  localityName,
+  localityNames,
 }: {
   values: FilterValues;
-  localityName?: string;
+  /**
+   * Map of neighborhoodId → display name for every selected locality.
+   * Multi-locality searches show one removable chip per locality so a buyer
+   * can drop one without losing the rest.
+   */
+  localityNames?: Record<string, string>;
 }) {
   const chips: Array<{ key: string; label: string; dropValue?: string }> = [];
 
@@ -238,7 +243,13 @@ export function AppliedFilters({
     }
   };
 
-  if (values.neighborhoodId && localityName) add('neighborhoodId', localityName);
+  // One chip per selected locality — dropping "Kondapur" from a
+  // "Kondapur + Gachibowli" search leaves Gachibowli intact, whereas a
+  // single "3 localities" chip would force clearing all three at once.
+  for (const id of (values.neighborhoodId ?? '').split(',').map((x) => x.trim()).filter(Boolean)) {
+    const name = localityNames?.[id];
+    if (name) add('neighborhoodId', name, id);
+  }
 
   const PROPERTY_TYPE_LABELS: Record<string, string> = {
     FLAT: 'Flat',
@@ -284,15 +295,31 @@ export function AppliedFilters({
     add('amenities', labelFor('amenity', amenity), amenity);
   }
 
+  // "Near me" — the three near-* params travel as one filter from the user's
+  // point of view, so a single chip represents them and clearing removes all
+  // three together. Handled below in hrefWithout via `dropValue = '__near__'`.
+  if (values.nearLat && values.nearLng) {
+    const radius = values.radiusKm ?? '5';
+    add('__near__', `Within ${radius} km of you`);
+  }
+
   if (chips.length === 0) {
     return null;
   }
 
   /** Rebuilds the URL without one filter — or without one amenity. */
   function hrefWithout(key: string, dropValue?: string): string {
+    // Sentinel key: "Near me" is one logical chip that hides three URL params
+    // (nearLat, nearLng, radiusKm). Dropping the chip drops all three so the
+    // buyer isn't left with an orphan radius applied against no coordinates.
+    const isNear = key === '__near__';
+
     const params = new URLSearchParams();
     for (const [name, value] of Object.entries(values)) {
       if (!value) continue;
+      if (isNear && (name === 'nearLat' || name === 'nearLng' || name === 'radiusKm')) {
+        continue;
+      }
       if (name === key && dropValue === undefined) continue;
       if (name === key && dropValue !== undefined) {
         const remaining = value

@@ -1,7 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-
-import type { Env } from '../../config/env.schema';
 
 /**
  * How a one-time code reaches a phone.
@@ -54,28 +51,5 @@ export class ConsoleOtpDelivery extends OtpDelivery {
   async send(phone: string, code: string): Promise<OtpDeliveryResult> {
     this.logger.warn(`[otp not delivered] ${phone} -> ${code}`);
     return { code, channel: this.channel };
-  }
-}
-
-/**
- * Chooses a driver from configuration.
- *
- * A single place to add the real one: implement OtpDelivery, register it here,
- * and nothing in the service, controller or interface changes.
- */
-@Injectable()
-export class OtpDeliveryFactory {
-  static create(config: ConfigService<Env, true>): OtpDelivery {
-    const driver = config.get('OTP_DELIVERY', { infer: true });
-
-    switch (driver) {
-      case 'console':
-        return new ConsoleOtpDelivery();
-      default:
-        // Unreachable while the env schema constrains the value, but an
-        // unmatched driver must fail loudly rather than silently falling back
-        // to the one that reveals codes.
-        throw new Error(`Unknown OTP delivery driver: ${String(driver)}`);
-    }
   }
 }

@@ -22,8 +22,23 @@ export interface ListingCard {
   pricePerSqft: number | null;
   isVerified: boolean;
   verifiedAt: string | null;
+  /**
+   * Public officer ID of the verifier (e.g. "V-001"). Null if unverified
+   * or if verified by a legacy account without a public ID assigned.
+   * Rendered next to the recency label on cards.
+   */
+  verifiedByOfficer: string | null;
   firstListedAt: string | null;
   lastConfirmedAt: string | null;
+  // --- Rent parity ---
+  kind: 'SALE' | 'RENT';
+  monthlyRent: number | null;
+  depositMonths: number | null;
+  tenantPreference: 'ANY' | 'FAMILY' | 'BACHELOR_MALE' | 'BACHELOR_FEMALE' | 'COMPANY' | null;
+  petsAllowed: boolean | null;
+  availableFrom: string | null;
+  leaseDurationMonths: number | null;
+  zeroBrokerage: boolean;
   property: {
     address: string;
     pincode: string;
@@ -272,6 +287,16 @@ export interface SearchParams {
   sort?: string;
   limit?: string;
   offset?: string;
+  // --- Rent parity ---
+  kind?: 'SALE' | 'RENT';
+  minRent?: string;
+  maxRent?: string;
+  maxDepositMonths?: string;
+  tenantPreference?: string;
+  petsAllowed?: string;
+  zeroBrokerage?: string;
+  /** ISO date. */
+  availableFrom?: string;
 }
 
 export const api = {
@@ -363,4 +388,277 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+
+  // ---------------------------------------------------------------------------
+  // Phase 2 additions — analytics, valuations, scoring, reviews, regulatory
+  // ---------------------------------------------------------------------------
+
+  /** Latest analytics snapshot + 1yr/3yr/5yr appreciation for a locality. */
+  localityAnalytics(neighborhoodId: string): Promise<LocalityAnalyticsResponse> {
+    return request<LocalityAnalyticsResponse>(
+      `/localities/${neighborhoodId}/analytics`,
+    );
+  },
+
+  /** Monthly price-trend series for a locality (downsampled to one point per month). */
+  localityAnalyticsSeries(
+    neighborhoodId: string,
+    months = 12,
+  ): Promise<LocalityAnalyticsSeries> {
+    return request<LocalityAnalyticsSeries>(
+      `/localities/${neighborhoodId}/analytics/series?months=${months}`,
+    );
+  },
+
+  /** City-level rollup for the homepage Insights Dashboard. */
+  citySummary(city: string): Promise<CitySummary> {
+    return request<CitySummary>(
+      `/analytics/insights/city-summary?city=${encodeURIComponent(city)}`,
+    );
+  },
+
+  /** Histogram of listings bucketed by ₹/sqft. */
+  cityPriceDistribution(city: string): Promise<CityPriceDistribution> {
+    return request<CityPriceDistribution>(
+      `/analytics/insights/price-distribution?city=${encodeURIComponent(city)}`,
+    );
+  },
+
+  /** City-wide weighted median price trend. */
+  cityTrend(city: string, months = 12): Promise<CityTrend> {
+    return request<CityTrend>(
+      `/analytics/insights/city-trend?city=${encodeURIComponent(city)}&months=${months}`,
+    );
+  },
+
+  /** Public list of approved locality reviews + rating summary. */
+  localityReviews(
+    neighborhoodId: string,
+    options: { limit?: number; offset?: number } = {},
+  ): Promise<LocalityReviewsResponse> {
+    const params = new URLSearchParams();
+    if (options.limit !== undefined) params.set('limit', String(options.limit));
+    if (options.offset !== undefined) params.set('offset', String(options.offset));
+    const qs = params.toString();
+    return request<LocalityReviewsResponse>(
+      `/localities/${neighborhoodId}/reviews${qs ? `?${qs}` : ''}`,
+    );
+  },
+
+  /** Investment score + breakdown for a listing. */
+  listingInvestmentScore(listingId: string): Promise<InvestmentScoreResponse> {
+    return request<InvestmentScoreResponse>(
+      `/listings/${listingId}/investment-score`,
+    );
+  },
+
+  /** Investment score + breakdown for a project. */
+  projectInvestmentScore(projectId: string): Promise<InvestmentScoreResponse> {
+    return request<InvestmentScoreResponse>(
+      `/projects/${projectId}/investment-score`,
+    );
+  },
+
+  /** RERA / regulatory registration lookup by number. Never throws 404 — status is NOT_FOUND. */
+  reraCheck(registrationNumber: string): Promise<RegulatoryCheckResult> {
+    return request<RegulatoryCheckResult>(
+      `/regulatory/rera/${encodeURIComponent(registrationNumber)}`,
+    );
+  },
+
+  /** Estimate a property value from comparables. */
+  estimateValuation(payload: ValuationEstimateInput): Promise<ValuationResult> {
+    return request<ValuationResult>('/valuations/estimate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /** Public directory of active field agents. */
+  listFieldAgents(): Promise<{ items: FieldAgentDirectoryEntry[] }> {
+    return request<{ items: FieldAgentDirectoryEntry[] }>('/field-agents');
+  },
 };
+
+// ---------------------------------------------------------------------------
+// Phase 2 response types
+// ---------------------------------------------------------------------------
+
+export interface LocalityAnalyticsResponse {
+  locality: { id: string; name: string; city: string };
+  latest: {
+    snapshotDate: string;
+    medianPricePerSqft: number | null;
+    listingCount: number;
+    sampleSize: number;
+    avgDaysOnMarket: number | null;
+  } | null;
+  appreciation: {
+    '1yr': number | null;
+    '3yr': number | null;
+    '5yr': number | null;
+  };
+}
+
+export interface LocalityAnalyticsSeries {
+  months: number;
+  points: Array<{
+    month: string;
+    medianPricePerSqft: number | null;
+    listingCount: number;
+  }>;
+}
+
+export interface CitySummary {
+  city: string;
+  listingCount: number;
+  medianPricePerSqft: number | null;
+  avgDaysOnMarket: number | null;
+  projectCount: number;
+  soldCount: number;
+  priceRange: { min: number | null; max: number | null };
+  computedAt: string;
+}
+
+export interface CityPriceDistribution {
+  city: string;
+  buckets: Array<{ label: string; count: number }>;
+  total: number;
+}
+
+export interface CityTrend {
+  city: string;
+  months: number;
+  points: Array<{
+    month: string;
+    medianPricePerSqft: number | null;
+    listingCount: number;
+  }>;
+}
+
+export interface LocalityReview {
+  id: string;
+  rating: number;
+  pros: string;
+  cons: string;
+  tenureYears: number | null;
+  createdAt: string;
+  authorFirstName: string;
+}
+
+export interface LocalityReviewsResponse {
+  total: number;
+  limit: number;
+  offset: number;
+  summary: {
+    averageRating: number | null;
+    totalCount: number;
+    distribution: Record<'1' | '2' | '3' | '4' | '5', number>;
+  };
+  items: LocalityReview[];
+}
+
+export interface InvestmentScoreComponent {
+  label: string;
+  score: number;
+  max: number;
+  rationale: string;
+}
+
+export interface InvestmentScoreResponse {
+  score: number;
+  computedAt: string;
+  components: InvestmentScoreComponent[];
+}
+
+export interface RegulatoryCheckResult {
+  found: boolean;
+  authority: 'TSRERA' | 'HMDA' | 'GHMC' | null;
+  registrationNumber: string;
+  status:
+    | 'ACTIVE'
+    | 'EXPIRED'
+    | 'REVOKED'
+    | 'UNDER_REVIEW'
+    | 'NOT_FOUND';
+  projectName: string | null;
+  promoterName: string | null;
+  registeredOn: string | null;
+  expiresOn: string | null;
+  isCurrent: boolean;
+  syncedAt: string | null;
+}
+
+export interface ValuationEstimateInput {
+  latitude?: number;
+  longitude?: number;
+  neighborhoodId?: string;
+  propertyType: string;
+  bedrooms: number;
+  areaSqft: number;
+  radiusKm?: number;
+}
+
+export interface ValuationResult {
+  estimatedLow: number;
+  estimatedMid: number;
+  estimatedHigh: number;
+  perSqft: { low: number; mid: number; high: number };
+  comparableCount: number;
+  confidence: 'high' | 'medium' | 'low' | 'insufficient';
+  method: 'radius_config_match' | 'locality_median' | 'insufficient_data';
+  comparables: Array<{
+    distanceKm: number | null;
+    bedrooms: number;
+    areaSqft: number;
+    pricePerSqft: number;
+    firstListedAt: string | null;
+  }>;
+  disclaimer: string;
+}
+
+// ---------------------------------------------------------------------------
+// Field agent — application + directory
+// ---------------------------------------------------------------------------
+
+export interface FieldAgentApplicationInput {
+  fullName: string;
+  phone: string;
+  email: string;
+  /**
+   * Sets up the applicant's account so they can sign back in to check
+   * status. The apply endpoint creates a User + FieldAgent atomically.
+   */
+  password: string;
+  experience: 'none' | '1-2' | '3-5' | '5+';
+  serviceLocalities: string[];
+  notes?: string;
+}
+
+export interface FieldAgentApplicationResponse {
+  fieldAgent: {
+    id: string;
+    status: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'INACTIVE';
+  };
+  user: {
+    id: string;
+    email: string;
+    fullName: string;
+    role: string;
+  };
+  tokens: {
+    accessToken: string;
+    refreshToken: string;
+    expiresIn: number;
+  };
+}
+
+export interface FieldAgentDirectoryEntry {
+  id: string;
+  fullName: string;
+  serviceLocalities: string[];
+  ratingAverage: number | null;
+  ratingCount: number;
+  completedAssignments: number;
+  activatedAt: string | null;
+}

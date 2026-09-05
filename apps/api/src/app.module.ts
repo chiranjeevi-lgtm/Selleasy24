@@ -12,6 +12,8 @@ import { JwtAuthGuard } from './common/auth/jwt-auth.guard';
 import { RolesGuard } from './common/auth/roles.guard';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { AgentsModule } from './modules/agents/agents.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { BuyersModule } from './modules/buyers/buyers.module';
 import { HealthModule } from './modules/health/health.module';
@@ -19,7 +21,14 @@ import { LeadsModule } from './modules/leads/leads.module';
 import { OtpModule } from './common/otp/otp.module';
 import { ListingsModule } from './modules/listings/listings.module';
 import { ProjectsModule } from './modules/projects/projects.module';
+import { CommitmentsModule } from './modules/commitments/commitments.module';
+import { ReferralsModule } from './modules/referrals/referrals.module';
+import { RegulatoryModule } from './modules/regulatory/regulatory.module';
+import { ReviewsModule } from './modules/reviews/reviews.module';
+import { ScoringModule } from './modules/scoring/scoring.module';
+import { ValuationsModule } from './modules/valuations/valuations.module';
 import { SavedModule } from './modules/saved/saved.module';
+import { SavedSearchesModule } from './modules/saved-searches/saved-searches.module';
 import { SearchModule } from './modules/search/search.module';
 import { VerificationModule } from './modules/verification/verification.module';
 
@@ -114,6 +123,15 @@ import { VerificationModule } from './modules/verification/verification.module';
     LeadsModule,
     SavedModule,
     BuyersModule,
+    ReviewsModule,
+    AnalyticsModule,
+    AgentsModule,
+    SavedSearchesModule,
+    ReferralsModule,
+    CommitmentsModule,
+    RegulatoryModule,
+    ScoringModule,
+    ValuationsModule,
     VerificationModule,
     AdminModule,
     HealthModule,

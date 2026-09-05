@@ -13,6 +13,7 @@ import { MailService } from '../../common/mail/mail.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { Env } from '../../config/env.schema';
 import type { RequestContext } from '../auth/auth.service';
+import { ReferralsService } from '../referrals/referrals.service';
 import type {
   CreateSiteVisitDto,
   RespondSiteVisitDto,
@@ -30,7 +31,41 @@ export class LeadsService {
     private readonly audit: AuditService,
     private readonly mail: MailService,
     private readonly config: ConfigService<Env, true>,
+    private readonly referrals: ReferralsService,
   ) {}
+
+  /**
+   * Admin-oversight notification. Fire-and-forget; kept PII-free by
+   * design — the buyer's name/phone/email lives on the Lead row and is
+   * visible to admins on the /admin/leads console (behind admin auth),
+   * not in the notification email.
+   *
+   * The "Your phone goes to one seller" promise applies to email
+   * distribution surface, so what admins receive is metadata (which
+   * listing, when, ticket id) plus a link to the console.
+   */
+  private async notifyAdmin(params: {
+    subject: string;
+    body: string;
+  }): Promise<void> {
+    const recipients = this.config
+      .getOrThrow<string>('ADMIN_NOTIFICATIONS_EMAIL')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    // Send in parallel; each mail.send already swallows its own errors so a
+    // downed recipient doesn't fail the enquiry flow.
+    await Promise.all(
+      recipients.map((to) =>
+        this.mail.send({
+          to,
+          subject: params.subject,
+          text: params.body,
+        }),
+      ),
+    );
+  }
 
   // -------------------------------------------------------------------------
   // Leads
@@ -101,6 +136,12 @@ export class LeadsService {
       text: `Hello ${listing.seller.fullName},\n\n${dto.name} has enquired about "${listing.title}".\n\nOpen your dashboard to see their contact details and respond:\n${this.config.getOrThrow<string>('APP_PUBLIC_URL')}/seller/leads\n\n— SellEasy24`,
     });
 
+    // Admin oversight — PII-free notification, details live on the admin console.
+    await this.notifyAdmin({
+      subject: `[SellEasy24] New enquiry on ${listing.title}`,
+      body: `A new enquiry was submitted on the listing "${listing.title}".\n\nSeller: ${listing.seller.fullName}\nLead reference: ${lead.id}\n\nView full detail (buyer contact + message) in the admin console:\n${this.config.getOrThrow<string>('ADMIN_PUBLIC_URL')}/leads\n\n— SellEasy24`,
+    });
+
     await this.audit.record({
       actorId: buyerId ?? null,
       action: AuditAction.LEAD_CREATED,
@@ -113,6 +154,21 @@ export class LeadsService {
       ipAddress: ctx.ip ?? null,
       userAgent: ctx.userAgent ?? null,
     });
+
+    // Referral buyer-side qualification, signed-in buyers only. Anonymous
+    // enquirers have no user id to tie back to a referral row. The service
+    // is idempotent — the second and subsequent lead submissions from the
+    // same buyer are no-ops. Wrapped so a referral quirk cannot fail the
+    // lead itself.
+    if (buyerId) {
+      try {
+        await this.referrals.qualifyForBuyer(buyerId);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        // eslint-disable-next-line no-console
+        console.warn(`Referral qualifyForBuyer failed for ${buyerId}: ${detail}`);
+      }
+    }
 
     // The lead id is returned so the buyer's client can show a reference.
     return { id: lead.id, submitted: true };
@@ -239,6 +295,14 @@ export class LeadsService {
       }.\n\nOpen your dashboard to see their contact details and respond:\n${this.config.getOrThrow<string>('APP_PUBLIC_URL')}/seller/leads\n\n— SellEasy24`,
     });
 
+    // Admin oversight — PII-free notification, details on the admin console.
+    await this.notifyAdmin({
+      subject: `[SellEasy24] New enquiry on project ${project.name}`,
+      body: `A new enquiry was submitted on the project "${project.name}"${
+        unitLabel ? ` (${unitLabel})` : ''
+      }.\n\nBuilder: ${project.builder.fullName}\nLead reference: ${lead.id}\n\nView full detail (buyer contact + message) in the admin console:\n${this.config.getOrThrow<string>('ADMIN_PUBLIC_URL')}/leads\n\n— SellEasy24`,
+    });
+
     await this.audit.record({
       actorId: buyerId ?? null,
       action: AuditAction.LEAD_CREATED,
@@ -252,6 +316,58 @@ export class LeadsService {
     });
 
     return { id: lead.id, submitted: true };
+  }
+
+  /**
+   * Admin — every lead across the platform.
+   *
+   * Full detail (buyer name, phone, email, message) is returned because
+   * the caller is authenticated admin/moderator staff and access is
+   * audited. Ordered newest-first, capped for pagination sanity.
+   */
+  async listAllLeads(params: { status?: LeadStatus; limit?: number; offset?: number }) {
+    const take = Math.min(params.limit ?? 50, 200);
+    const skip = params.offset ?? 0;
+    const where = params.status ? { status: params.status } : {};
+
+    const [items, total] = await Promise.all([
+      this.prisma.lead.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take,
+        skip,
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          email: true,
+          message: true,
+          status: true,
+          contactedAt: true,
+          createdAt: true,
+          listing: {
+            select: {
+              id: true,
+              title: true,
+              seller: { select: { id: true, fullName: true, email: true } },
+            },
+          },
+          project: {
+            select: {
+              id: true,
+              name: true,
+              builder: { select: { id: true, fullName: true, email: true } },
+            },
+          },
+          projectUnit: {
+            select: { id: true, bedrooms: true, areaSqft: true, priceFrom: true },
+          },
+        },
+      }),
+      this.prisma.lead.count({ where }),
+    ]);
+
+    return { items, total, limit: take, offset: skip };
   }
 
   async updateLeadStatus(
@@ -518,6 +634,12 @@ Open your dashboard to see the requested time and respond:
 ${this.config.getOrThrow<string>('APP_PUBLIC_URL')}/seller/visits
 
 — SellEasy24`,
+    });
+
+    // Admin oversight — same PII-free pattern as enquiries.
+    await this.notifyAdmin({
+      subject: `[SellEasy24] New visit request for ${listing.title}`,
+      body: `A new site-visit request was submitted on the listing "${listing.title}".\n\nSeller: ${listing.seller.fullName}\nRequest reference: ${created.id}\n\nView full detail (buyer, requested time, note) in the admin console:\n${this.config.getOrThrow<string>('ADMIN_PUBLIC_URL')}/leads\n\n— SellEasy24`,
     });
 
     await this.audit.record({

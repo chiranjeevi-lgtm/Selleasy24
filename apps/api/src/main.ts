@@ -40,7 +40,14 @@ async function bootstrap(): Promise<void> {
       // Presigned document URLs point at the storage host; a full referrer would
       // leak our path structure to it.
       referrerPolicy: { policy: 'no-referrer' },
-      crossOriginResourcePolicy: { policy: 'same-site' },
+      // `cross-origin` — this is an API server whose entire purpose is to be
+      // consumed by a frontend on a different origin (`:3000` in dev, a
+      // separate subdomain in prod). The real cross-origin gate is the
+      // `enableCors` allow-list below; CORP `same-site` was blocking Chrome
+      // from delivering JSON responses to the web app even though CORS
+      // allowed them, because Chrome treats different-port localhost as a
+      // different site for CORP purposes.
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
       hsts: isProduction
         ? { maxAge: 31_536_000, includeSubDomains: true, preload: true }
         : false,

@@ -54,6 +54,16 @@ export const PUBLIC_LISTING_SELECT = {
   lastConfirmedAt: true,
   verifiedAt: true,
   viewsCount: true,
+  // Rent-parity fields — always selected because the same select serves
+  // both /sale and /rent surfaces. Consumers dispatch on `kind`.
+  kind: true,
+  monthlyRent: true,
+  depositMonths: true,
+  tenantPreference: true,
+  petsAllowed: true,
+  availableFrom: true,
+  leaseDurationMonths: true,
+  zeroBrokerage: true,
   property: {
     select: {
       id: true,
@@ -85,6 +95,13 @@ export const PUBLIC_LISTING_SELECT = {
   // a lead, not by scraping a contact field.
   seller: {
     select: { id: true, fullName: true, sellerKind: true },
+  },
+  // Verifier's public officer ID — nothing else about them. Rendered next
+  // to the "verified Nh ago" stamp on cards so the check is attributable
+  // (Cross-Cutting Principle #4). Full name, email, and internal user id
+  // are deliberately NOT selected — those never reach a public payload.
+  verifiedBy: {
+    select: { officerPublicId: true },
   },
 } satisfies Prisma.ListingSelect;
 
